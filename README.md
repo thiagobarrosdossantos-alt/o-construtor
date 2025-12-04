@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # 🏗️ O Construtor
 
 **O Construtor** é uma plataforma de Engenharia de Software Autônoma que orquestra múltiplos agentes de Inteligência Artificial para construir, refatorar e revisar código de alta performance.
@@ -25,4 +24,33 @@ O sistema opera como um time de desenvolvimento completo, onde cada IA tem uma r
 - **Interface:** Streamlit (Python)
 - **Core AI:** Google GenAI SDK (v2)
 - **Banco de Dados:** Supabase
-- **Automação:*
+- **Automação:** GitHub Actions & Vertex AI
+
+---
+
+## 🚀 Como Iniciar
+
+1. **Clone o repositório:**
+   ```bash
+   git clone https://github.com/usuario/o-construtor.git
+   cd o-construtor
+   ```
+
+2. **Configure o ambiente:**
+   Crie um arquivo `.env` na raiz:
+   ```env
+   GOOGLE_API_KEY=sua_chave_aqui
+   ```
+
+3. **Instale as dependências:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Execute:**
+   ```bash
+   streamlit run app.py
+   ```
+
+---
+*Versão Oficial - O Construtor*

@@ -154,7 +154,7 @@ def format_comment(agent_name: str, analysis: str) -> str:
 {analysis}
 
 ---
-*Análise via A Colmeia - Sistema Autônomo de Agentes IA*
+*Análise via O Construtor - Sistema Autônomo de Agentes IA*
 """
 
 async def main():
@@ -256,7 +256,7 @@ async def main():
     """
     
     prompt_jules = """
-    Você é Jules, Engenheiro Principal de DevOps e SRE de A Colmeia.
+    Você é Jules, Engenheiro Principal de DevOps e SRE de O Construtor.
     Realize uma ANÁLISE PROFUNDA e CRÍTICA sobre a infraestrutura e entrega.
     
     Foco:

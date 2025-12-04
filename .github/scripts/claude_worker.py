@@ -58,7 +58,7 @@ def review_pull_request():
     for file in files:
         if file.filename.endswith(('.py', '.js', '.ts', '.tsx', '.jsx')):
             prompt = f"""
-Você é o revisor de código de A Colmeia - Sistema de Agentes de IA.
+Você é o revisor de código de O Construtor - Sistema de Agentes de IA.
 
 Analise este arquivo modificado:
 Arquivo: {file.filename}
@@ -85,7 +85,7 @@ Seja DIRETO.
 
 ---
 
-*Análise automática via A Colmeia - Sistema de Agentes de IA*
+*Análise automática via O Construtor - Sistema de Agentes de IA*
 """)
         print("✅ Revisão postada!")
     else:
@@ -108,7 +108,7 @@ Issue: {issue.title}
 
 {issue.body}
 
-Você é Claude Worker - Agente Autônomo de A Colmeia.
+Você é Claude Worker - Agente Autônomo de O Construtor.
 
 Forneça resposta DIRETA e PRÁTICA com comandos exatos se aplicável.
 """
@@ -122,7 +122,7 @@ Forneça resposta DIRETA e PRÁTICA com comandos exatos se aplicável.
 
 ---
 
-*Resposta automática via A Colmeia*
+*Resposta automática via O Construtor*
 """)
     print("✅ Resposta postada!")
 
