@@ -12,16 +12,24 @@ from github import Github
 PROJECT_ID = os.getenv('GCP_PROJECT_ID', 'gen-lang-client-0394737170')
 LOCATION = "us-central1"
 
-# Model definitions
-MODEL_CLAUDE_NAME = "claude-opus-4-5-20251101" 
+# Model definitions - ESTRATÉGIA OTIMIZADA
+# Claude Opus 4.5: Arquitetura e design (raciocínio profundo)
+MODEL_CLAUDE_NAME = "claude-opus-4-5-20251101"
 REQUESTED_CLAUDE_MODEL = "claude-opus-4-5-20251101"
 
-# Updated to gemini-2.5-pro
-MODEL_GEMINI_NAME = "gemini-2.5-pro" 
+# Gemini 3 Pro Preview: Performance e Segurança (novo modelo com raciocínio melhorado)
+MODEL_GEMINI_3_PRO = "gemini-3-pro-preview"
+
+# Gemini 2.5 Pro: DevOps e análises gerais
+MODEL_GEMINI_25_PRO = "gemini-2.5-pro"
 MODEL_GEMINI_FALLBACK = "gemini-2.5-pro"
 
-# Jules Engine
-MODEL_JULES_ENGINE = "gemini-2.5-pro" 
+# Agentes e seus modelos
+AGENT_MODELS = {
+    "Claude Opus 4.5": MODEL_CLAUDE_NAME,      # Arquitetura, SOLID, Design Patterns
+    "Gemini 3 Pro": MODEL_GEMINI_3_PRO,        # Performance, Big O, Segurança
+    "Jules": MODEL_GEMINI_25_PRO,              # DevOps, CI/CD, Testes
+} 
 
 def get_file_content(repo, file):
     """Fetches the content of a file from the repo."""
@@ -243,16 +251,23 @@ async def main():
     """
     
     prompt_gemini = """
-    Você é Gemini 2.5 Pro, especialista Sênior em Performance e Engenharia de Software.
-    Realize uma ANÁLISE PROFUNDA, DETALHADA e COMPLETA.
-    Busque cada milissegundo de latência e cada byte de memória desperdiçado.
-    
-    Foco:
-    1. Complexidade Ciclomática e Algorítmica (Big O) - Analise loops e recursões.
-    2. Uso de recursos (Memória, CPU, I/O, Database Calls).
-    3. Concorrência e Paralelismo.
-    
-    Sugira refatorações concretas para performance máxima.
+    Você é Gemini 3 Pro Preview, o mais avançado modelo de análise de performance e segurança.
+    Utilize seu raciocínio profundo para realizar uma ANÁLISE COMPLETA e DETALHADA.
+    Busque cada milissegundo de latência e cada vulnerabilidade potencial.
+
+    Foco Performance:
+    1. Complexidade Ciclomática e Algorítmica (Big O) - Analise loops, recursões e estruturas de dados.
+    2. Uso de recursos (Memória, CPU, I/O, Database Calls, N+1 queries).
+    3. Concorrência e Paralelismo - Race conditions, deadlocks.
+    4. Caching e otimização de queries.
+
+    Foco Segurança:
+    1. OWASP Top 10 - Injection, XSS, CSRF, etc.
+    2. Autenticação e Autorização.
+    3. Exposição de dados sensíveis.
+    4. Dependências vulneráveis.
+
+    Sugira refatorações concretas com exemplos de código.
     """
     
     prompt_jules = """
@@ -272,15 +287,15 @@ async def main():
     print("🚀 Iniciando análise multi-agente (Modo Alta Capacidade)...")
     
     results = await asyncio.gather(
-        analyze_with_model("Claude Opus 4.5", REQUESTED_CLAUDE_MODEL, prompt_claude, code_context),
-        analyze_with_model("Gemini 2.5 Pro", MODEL_GEMINI_NAME, prompt_gemini, code_context),
-        analyze_with_model("Jules", MODEL_JULES_ENGINE, prompt_jules, code_context)
+        analyze_with_model("Claude Opus 4.5", AGENT_MODELS["Claude Opus 4.5"], prompt_claude, code_context),
+        analyze_with_model("Gemini 3 Pro", AGENT_MODELS["Gemini 3 Pro"], prompt_gemini, code_context),
+        analyze_with_model("Jules", AGENT_MODELS["Jules"], prompt_jules, code_context)
     )
-    
+
     # 5. Post Comments
     print("Posting comments to PR...")
-    
-    agents = ["Claude Opus 4.5", "Gemini 2.5 Pro", "Jules"]
+
+    agents = ["Claude Opus 4.5", "Gemini 3 Pro", "Jules"]
     for i, analysis in enumerate(results):
         if analysis and "Error executing analysis" not in analysis:
             try:

@@ -1,0 +1,52 @@
+# O Construtor - Dependencies
+# Sistema Autônomo de Engenharia de Software
+
+# === CORE ===
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+
+# === WEB FRAMEWORK ===
+streamlit>=1.29.0
+fastapi>=0.104.0
+uvicorn>=0.24.0
+websockets>=12.0
+
+# === AI PROVIDERS ===
+# Google AI
+google-generativeai>=0.3.0
+google-cloud-aiplatform>=1.38.0
+vertexai>=1.0.0
+
+# Anthropic (Claude)
+anthropic[vertex]>=0.39.0
+
+# === GITHUB ===
+PyGithub>=2.1.0
+
+# === DATABASE ===
+supabase>=2.3.0
+redis>=5.0.0
+
+# === ASYNC ===
+asyncio>=3.4.3
+aiohttp>=3.9.0
+aiofiles>=23.2.0
+
+# === UTILITIES ===
+tenacity>=8.2.0  # Retry logic
+structlog>=23.2.0  # Structured logging
+prometheus-client>=0.19.0  # Metrics
+
+# === TESTING ===
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+
+# === DEVELOPMENT ===
+black>=23.12.0
+isort>=5.13.0
+mypy>=1.7.0
+ruff>=0.1.8
+
+# === TYPE STUBS ===
+types-redis>=4.6.0
