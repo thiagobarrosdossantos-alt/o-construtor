@@ -11,7 +11,7 @@ ESTRATÉGIA DE MODELOS:
    - Análise de trade-offs
    - Raciocínio profundo e planejamento
 
-2. CLAUDE SONNET 4 (claude-sonnet-4-20250514)
+2. CLAUDE SONNET 4.5 (claude-sonnet-4-5-20250929)
    - Implementação de código
    - Refatoração
    - Code review detalhado
@@ -134,12 +134,12 @@ class ModelConfig:
     """Configuração completa de modelos do O Construtor"""
 
     # ============================================================
-    # MODELOS CLAUDE (Anthropic via Vertex AI)
+    # MODELOS CLAUDE (Anthropic API Direta)
     # ============================================================
 
     CLAUDE_OPUS: ModelSpec = field(default_factory=lambda: ModelSpec(
         name="claude-opus-4-5-20251101",
-        provider=Provider.ANTHROPIC_VERTEX,
+        provider=Provider.ANTHROPIC_DIRECT,
         max_tokens=8192,
         temperature=0.8,
         supports_streaming=True,
@@ -151,8 +151,8 @@ class ModelConfig:
     ))
 
     CLAUDE_SONNET: ModelSpec = field(default_factory=lambda: ModelSpec(
-        name="claude-sonnet-4-20250514",
-        provider=Provider.ANTHROPIC_VERTEX,
+        name="claude-sonnet-4-5-20250929",
+        provider=Provider.ANTHROPIC_DIRECT,
         max_tokens=8192,
         temperature=0.5,
         supports_streaming=True,

@@ -79,7 +79,7 @@ class ClaudeCodeClient:
         self,
         working_dir: str = ".",
         api_key: Optional[str] = None,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-sonnet-4-5-20250929",
         use_cli: bool = True,
     ):
         self.working_dir = Path(working_dir).resolve()
