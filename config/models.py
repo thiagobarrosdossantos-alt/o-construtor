@@ -109,6 +109,7 @@ class Provider(Enum):
     ANTHROPIC_DIRECT = "anthropic_direct"  # Claude via API direta
     GOOGLE_VERTEX = "google_vertex"  # Gemini via Vertex AI
     GOOGLE_AI_STUDIO = "google_ai_studio"  # Gemini via AI Studio
+    OPENAI_DIRECT = "openai_direct"  # GPT via API direta
     CLAUDE_CODE = "claude_code"  # Claude Code CLI
     GEMINI_CODE_ASSIST = "gemini_code_assist"  # Gemini Code Assist Extension
 
@@ -161,6 +162,19 @@ class ModelConfig:
         cost_per_1k_output=0.015,
         latency_class="medium",
         reasoning_depth="medium"
+    ))
+
+    CLAUDE_HAIKU: ModelSpec = field(default_factory=lambda: ModelSpec(
+        name="claude-haiku-4-20250514",
+        provider=Provider.ANTHROPIC_DIRECT,
+        max_tokens=8192,
+        temperature=0.3,
+        supports_streaming=True,
+        supports_vision=False,
+        cost_per_1k_input=0.0008,
+        cost_per_1k_output=0.004,
+        latency_class="low",
+        reasoning_depth="shallow"
     ))
 
     # ============================================================
@@ -219,6 +233,49 @@ class ModelConfig:
         cost_per_1k_output=0.0004,
         latency_class="low",
         reasoning_depth="medium"
+    ))
+
+    # ============================================================
+    # MODELOS GPT (OpenAI via API Direta)
+    # ============================================================
+
+    GPT_51: ModelSpec = field(default_factory=lambda: ModelSpec(
+        name="gpt-5.1",
+        provider=Provider.OPENAI_DIRECT,
+        max_tokens=16384,
+        temperature=0.7,
+        supports_streaming=True,
+        supports_vision=True,
+        cost_per_1k_input=0.010,
+        cost_per_1k_output=0.030,
+        latency_class="medium",
+        reasoning_depth="deep"
+    ))
+
+    GPT_4O: ModelSpec = field(default_factory=lambda: ModelSpec(
+        name="gpt-4o",
+        provider=Provider.OPENAI_DIRECT,
+        max_tokens=8192,
+        temperature=0.5,
+        supports_streaming=True,
+        supports_vision=True,
+        cost_per_1k_input=0.0025,
+        cost_per_1k_output=0.010,
+        latency_class="medium",
+        reasoning_depth="medium"
+    ))
+
+    GPT_4O_MINI: ModelSpec = field(default_factory=lambda: ModelSpec(
+        name="gpt-4o-mini",
+        provider=Provider.OPENAI_DIRECT,
+        max_tokens=8192,
+        temperature=0.3,
+        supports_streaming=True,
+        supports_vision=False,
+        cost_per_1k_input=0.00015,
+        cost_per_1k_output=0.0006,
+        latency_class="low",
+        reasoning_depth="shallow"
     ))
 
     # ============================================================

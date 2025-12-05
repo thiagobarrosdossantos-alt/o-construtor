@@ -24,7 +24,12 @@ from config.models import (
     AGENT_CONFIGS,
     TASK_MODEL_MAPPING,
     COLLABORATION_STRATEGY,
-    get_model_for_task,
+    get_model_for_task as get_model_for_task_legacy,
+)
+from config.teams import (
+    get_model_for_task as get_team_model_selection,
+    estimate_task_complexity,
+    AGENT_TO_TEAM,
 )
 
 logger = logging.getLogger(__name__)
@@ -342,9 +347,13 @@ class Orchestrator:
                 step.status = WorkflowState.IN_PROGRESS
                 step.started_at = datetime.now()
 
+                # Obter valores de forma segura
+                agent_role_value = step.agent_role.value if hasattr(step.agent_role, 'value') else str(step.agent_role)
+                task_type_value = step.task_type.value if hasattr(step.task_type, 'value') else str(step.task_type)
+
                 logger.info(
                     f"Executing step {i + 1}/{len(workflow.steps)}: "
-                    f"{step.agent_role.value} - {step.task_type.value}"
+                    f"{agent_role_value} - {task_type_value}"
                 )
 
                 # Prepara input com contexto acumulado
@@ -406,7 +415,10 @@ class Orchestrator:
         workflow: Workflow,
     ) -> Dict[str, Any]:
         """
-        Executa um passo individual do workflow.
+        Executa um passo individual do workflow com seleção inteligente de modelo.
+
+        NOVO: Usa sistema de equipes estratégicas para selecionar o modelo
+        mais apropriado baseado no agente e complexidade da tarefa.
 
         Args:
             step: Passo a ser executado
@@ -415,21 +427,52 @@ class Orchestrator:
         Returns:
             Resultado da execução do passo
         """
+        # Obtém valores de forma segura
+        agent_role_str = step.agent_role.value if hasattr(step.agent_role, 'value') else str(step.agent_role)
+        task_type_str = step.task_type.value if hasattr(step.task_type, 'value') else str(step.task_type)
+
         # Obtém configuração do agente
-        agent_config = AGENT_CONFIGS.get(step.agent_role.value)
+        agent_config = AGENT_CONFIGS.get(agent_role_str)
         if not agent_config:
             raise ValueError(f"Agent config not found for role: {step.agent_role}")
 
-        # Obtém modelos para a tarefa
-        models = get_model_for_task(step.task_type)
-        if not models:
-            raise ValueError(f"No models found for task: {step.task_type}")
+        # === NOVA LÓGICA: SELEÇÃO INTELIGENTE COM EQUIPES ===
 
-        primary_model = models[0]
+        # 1. Estima complexidade da tarefa
+        task_description = step.input_data.get("description", "")
+        if not task_description and workflow.description:
+            task_description = workflow.description
 
+        complexity = estimate_task_complexity(
+            task_type=task_type_str,
+            task_description=task_description
+        )
+
+        # 2. Obtém modelo apropriado da equipe do agente
+        model_name = get_team_model_selection(
+            agent=agent_role_str,
+            task_complexity=complexity
+        )
+
+        # 3. Converte nome do modelo para ModelSpec
+        model_spec = getattr(self.model_config, model_name, None)
+        if not model_spec:
+            # Fallback para sistema legado se modelo não encontrado
+            logger.warning(f"Model {model_name} not found, using legacy selection")
+            models = get_model_for_task_legacy(step.task_type)
+            model_spec = models[0] if models else None
+
+        if not model_spec:
+            raise ValueError(f"No model found for task: {step.task_type}")
+
+        # Log detalhado da seleção
+        team = AGENT_TO_TEAM.get(step.agent_role.value, "unknown")
+        team_name = team.value if hasattr(team, 'value') else str(team)
         logger.info(
-            f"Executing with agent {agent_config.name} ({agent_config.emoji}) "
-            f"using model {primary_model.name}"
+            f"Agent: {agent_config.name} ({agent_config.emoji}) | "
+            f"Team: {team_name} | "
+            f"Complexity: {complexity} | "
+            f"Model: {model_spec.name}"
         )
 
         # Verifica se é tarefa colaborativa (Claude Code + Gemini Code Assist)
@@ -440,7 +483,7 @@ class Orchestrator:
         # Execução simples com um modelo
         return await self._call_agent(
             agent_config=agent_config,
-            model=primary_model,
+            model=model_spec,
             task_type=step.task_type,
             input_data=step.input_data,
             context=workflow.context,
@@ -539,6 +582,9 @@ class Orchestrator:
         Esta é uma implementação placeholder que será conectada
         aos clients reais (Vertex AI, Claude Code, etc.)
         """
+        # Obter valor de forma segura
+        task_type_str = task_type.value if hasattr(task_type, 'value') else str(task_type)
+
         logger.info(f"Calling agent {agent_config.name} with model {model.name}")
 
         # TODO: Implementar chamada real ao modelo
@@ -546,7 +592,7 @@ class Orchestrator:
         return {
             "agent": agent_config.name,
             "model": model.name,
-            "task": task_type.value,
+            "task": task_type_str,
             "status": "placeholder",
             "message": "Agent execution placeholder - implement real model calls",
             "timestamp": datetime.now().isoformat(),
@@ -564,12 +610,15 @@ class Orchestrator:
 
         Esta é uma implementação placeholder.
         """
-        logger.info(f"Calling model {model.name} for task {task_type.value}")
+        # Obter valor de forma segura
+        task_type_str = task_type.value if hasattr(task_type, 'value') else str(task_type)
+
+        logger.info(f"Calling model {model.name} for task {task_type_str}")
 
         # TODO: Implementar chamada real
         return {
             "model": model.name,
-            "task": task_type.value,
+            "task": task_type_str,
             "status": "placeholder",
             "timestamp": datetime.now().isoformat(),
         }
@@ -619,9 +668,13 @@ class Orchestrator:
         """Retorna o passo atual em execução"""
         for step in workflow.steps:
             if step.status == WorkflowState.IN_PROGRESS:
+                # Obter valores de forma segura
+                agent_role_str = step.agent_role.value if hasattr(step.agent_role, 'value') else str(step.agent_role)
+                task_type_str = step.task_type.value if hasattr(step.task_type, 'value') else str(step.task_type)
+
                 return {
-                    "agent": step.agent_role.value,
-                    "task": step.task_type.value,
+                    "agent": agent_role_str,
+                    "task": task_type_str,
                     "started_at": step.started_at.isoformat() if step.started_at else None,
                 }
         return None

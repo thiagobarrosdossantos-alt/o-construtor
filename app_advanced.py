@@ -5,6 +5,8 @@ Interface completa com orquestração de agentes, workflows e métricas
 import streamlit as st
 import asyncio
 import os
+import subprocess
+from pathlib import Path
 from dotenv import load_dotenv
 from datetime import datetime
 import plotly.graph_objects as go
@@ -19,6 +21,117 @@ from config.models import TaskType
 
 # Carrega variáveis de ambiente
 load_dotenv()
+
+# ===========================
+# FUNÇÕES AUXILIARES GITHUB
+# ===========================
+
+async def clone_repository(repo_url: str, target_dir: str = None) -> tuple[bool, str]:
+    """Clona um repositório GitHub"""
+    try:
+        repo_name = repo_url.split("/")[-1].replace(".git", "")
+        clone_path = target_dir or f"./repos/{repo_name}"
+
+        # Criar diretório se não existir
+        Path(clone_path).parent.mkdir(parents=True, exist_ok=True)
+
+        # Verificar se já existe
+        if Path(clone_path).exists():
+            return True, clone_path
+
+        # Clonar
+        result = subprocess.run(
+            ["git", "clone", repo_url, clone_path],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if result.returncode == 0:
+            return True, clone_path
+        else:
+            return False, f"Erro ao clonar: {result.stderr}"
+
+    except Exception as e:
+        return False, str(e)
+
+
+async def start_autonomous_work(orchestrator, repo_url: str, repo_name: str, action: str,
+                                autonomous: bool, create_pr: bool, run_tests: bool, priority: str):
+    """Inicia trabalho autônomo em um repositório"""
+    try:
+        # Clonar repositório
+        success, repo_path = await clone_repository(repo_url)
+
+        if not success:
+            return False, repo_path
+
+        # Mapear ação para descrição
+        action_descriptions = {
+            "analyze": "Analisar código, estrutura e identificar melhorias",
+            "improve": "Implementar melhorias automaticamente no código",
+            "continue": "Dar continuidade ao desenvolvimento do projeto",
+            "fix_bugs": "Encontrar e corrigir bugs no código",
+            "add_tests": "Criar testes automatizados completos",
+            "document": "Melhorar documentação do projeto",
+            "optimize": "Otimizar performance e eficiência"
+        }
+
+        # Mapear ação para tipo de request do orchestrator
+        action_to_request_type = {
+            "analyze": "review",
+            "improve": "feature",
+            "continue": "feature",
+            "fix_bugs": "bugfix",
+            "add_tests": "feature",
+            "document": "feature",
+            "optimize": "refactor"
+        }
+
+        # Mapear prioridade
+        priority_map = {
+            "Baixa": "low",
+            "Média": "normal",
+            "Alta": "high",
+            "Crítica": "critical"
+        }
+
+        # Criar request data
+        request_data = {
+            "title": f"{action_descriptions[action]} - {repo_name}",
+            "description": f"""
+Repositório: {repo_url}
+Caminho local: {repo_path}
+Ação: {action_descriptions[action]}
+Modo: {'Autônomo' if autonomous else 'Supervisionado'}
+
+Tarefas:
+1. Analisar repositório completo
+2. Executar ação: {action}
+3. {'Executar testes' if run_tests else 'Pular testes'}
+4. {'Criar Pull Request automaticamente' if create_pr else 'Aguardar aprovação manual'}
+            """,
+            "repo_url": repo_url,
+            "repo_path": repo_path,
+            "repo_name": repo_name,
+            "action": action,
+            "autonomous": autonomous,
+            "create_pr": create_pr,
+            "run_tests": run_tests
+        }
+
+        # Criar workflow no orchestrator
+        request_type = action_to_request_type[action]
+        workflow = await orchestrator.process_request(
+            request_type=request_type,
+            request_data=request_data,
+            priority=priority_map[priority]
+        )
+
+        return True, workflow.id
+
+    except Exception as e:
+        return False, str(e)
 
 # Configuração da página
 st.set_page_config(
@@ -98,7 +211,7 @@ st.sidebar.markdown("---")
 
 page = st.sidebar.radio(
     "Navegação",
-    ["🏠 Dashboard", "🤖 Agentes", "📋 Tarefas", "🔄 Workflows", "📊 Métricas", "💬 Chat"]
+    ["🏠 Dashboard", "🔗 GitHub", "🤖 Agentes", "📋 Tarefas", "🔄 Workflows", "📊 Métricas", "💬 Chat"]
 )
 
 st.sidebar.markdown("---")
@@ -106,8 +219,8 @@ st.sidebar.markdown("---")
 # Status do sistema
 if system_ready:
     st.sidebar.success("✅ Sistema Operacional")
-    st.sidebar.metric("Agentes Ativos", len(orchestrator._agents) if orchestrator else 0)
-    st.sidebar.metric("Tarefas Pendentes", task_queue.size() if task_queue else 0)
+    st.sidebar.metric("Agentes Ativos", len(orchestrator.agents) if orchestrator else 0)
+    st.sidebar.metric("Tarefas Pendentes", task_queue.get_queue_size() if task_queue else 0)
 else:
     st.sidebar.error("❌ Sistema Offline")
 
@@ -126,11 +239,11 @@ if page == "🏠 Dashboard":
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.metric("Agentes", len(orchestrator._agents))
+        st.metric("Agentes", len(orchestrator.agents))
     with col2:
         st.metric("Tarefas Concluídas", 0)  # TODO: pegar do orchestrator
     with col3:
-        st.metric("Em Andamento", task_queue.size())
+        st.metric("Em Andamento", task_queue.get_queue_size())
     with col4:
         st.metric("Taxa de Sucesso", "95%")
 
@@ -142,11 +255,11 @@ if page == "🏠 Dashboard":
     agents_info = [
         {"nome": "Arquiteto", "emoji": "🏛️", "modelo": "Claude Opus 4.5", "status": "Idle"},
         {"nome": "Desenvolvedor", "emoji": "👨‍💻", "modelo": "Claude Code + Gemini", "status": "Idle"},
-        {"nome": "Revisor", "emoji": "🔍", "modelo": "Gemini 3 Pro", "status": "Idle"},
+        {"nome": "Revisor", "emoji": "🔍", "modelo": "Gemini 2.5 Pro", "status": "Idle"},
         {"nome": "Tester", "emoji": "🧪", "modelo": "Gemini 2.5 Flash", "status": "Idle"},
         {"nome": "DevOps (Jules)", "emoji": "🚀", "modelo": "Gemini 2.5 Pro", "status": "Idle"},
-        {"nome": "Segurança", "emoji": "🔐", "modelo": "Gemini 3 Pro", "status": "Idle"},
-        {"nome": "Otimizador", "emoji": "⚡", "modelo": "Gemini 3 Pro", "status": "Idle"},
+        {"nome": "Segurança", "emoji": "🔐", "modelo": "Gemini 2.5 Pro", "status": "Idle"},
+        {"nome": "Otimizador", "emoji": "⚡", "modelo": "Gemini 2.5 Pro", "status": "Idle"},
     ]
 
     cols = st.columns(4)
@@ -180,6 +293,212 @@ if page == "🏠 Dashboard":
         height=300
     )
     st.plotly_chart(fig, use_container_width=True)
+
+# ===========================
+# PÁGINA: GITHUB
+# ===========================
+
+elif page == "🔗 GitHub":
+    st.title("🔗 Integração com GitHub")
+
+    # Status do GitHub Token
+    github_token = os.getenv("GITHUB_TOKEN")
+
+    if github_token:
+        st.success("✅ GitHub Token configurado")
+
+        # Seção: Seus Repositórios
+        st.markdown("---")
+        st.subheader("📦 Seus Repositórios")
+
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            # Input para URL do repositório
+            repo_url = st.text_input(
+                "URL do Repositório",
+                placeholder="https://github.com/usuario/repositorio",
+                help="Cole a URL do repositório GitHub que deseja trabalhar"
+            )
+
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🔍 Buscar", use_container_width=True):
+                if repo_url:
+                    st.session_state['selected_repo'] = repo_url
+
+        # Se tem repositório selecionado
+        if 'selected_repo' in st.session_state and st.session_state['selected_repo']:
+            repo = st.session_state['selected_repo']
+            repo_name = repo.split('/')[-1].replace('.git', '')
+
+            st.markdown("---")
+            st.subheader(f"📂 {repo_name}")
+
+            # Informações do repo
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Status", "Pronto")
+            with col2:
+                st.metric("Branch", "main")
+            with col3:
+                st.metric("Commits", "---")
+
+            st.markdown("---")
+
+            # Ações disponíveis
+            st.subheader("🎯 O que você quer fazer?")
+
+            action = st.radio(
+                "Escolha uma ação:",
+                [
+                    "🔍 Analisar - Analisar código e identificar melhorias",
+                    "🚀 Melhorar - Implementar melhorias automaticamente",
+                    "✨ Continuar - Dar continuidade ao projeto",
+                    "🐛 Corrigir Bugs - Encontrar e corrigir bugs",
+                    "🧪 Adicionar Testes - Criar testes automatizados",
+                    "📚 Documentar - Melhorar documentação",
+                    "⚡ Otimizar - Melhorar performance"
+                ],
+                help="O Construtor executará esta ação de forma autônoma"
+            )
+
+            # Opções avançadas
+            with st.expander("⚙️ Opções Avançadas"):
+                autonomous = st.checkbox(
+                    "Modo Autônomo Completo",
+                    value=True,
+                    help="O Construtor trabalhará de forma totalmente autônoma, apenas reportando progresso"
+                )
+
+                create_pr = st.checkbox(
+                    "Criar Pull Request automaticamente",
+                    value=True,
+                    help="Criar PR quando terminar as mudanças"
+                )
+
+                run_tests = st.checkbox(
+                    "Executar testes antes do PR",
+                    value=True,
+                    help="Garantir que testes passam antes de criar PR"
+                )
+
+                priority = st.select_slider(
+                    "Prioridade",
+                    options=["Baixa", "Média", "Alta", "Crítica"],
+                    value="Alta"
+                )
+
+            st.markdown("---")
+
+            # Botão de iniciar
+            col1, col2, col3 = st.columns([1, 2, 1])
+
+            with col2:
+                if st.button("🚀 INICIAR TRABALHO AUTÔNOMO", type="primary", use_container_width=True):
+                    # Extrair ação
+                    action_map = {
+                        "🔍 Analisar": "analyze",
+                        "🚀 Melhorar": "improve",
+                        "✨ Continuar": "continue",
+                        "🐛 Corrigir Bugs": "fix_bugs",
+                        "🧪 Adicionar Testes": "add_tests",
+                        "📚 Documentar": "document",
+                        "⚡ Otimizar": "optimize"
+                    }
+
+                    selected_action = action_map[action.split(" - ")[0]]
+
+                    with st.spinner("Inicializando O Construtor..."):
+                        # Verificar se o orchestrator está disponível
+                        if not system_ready or orchestrator is None:
+                            st.error("❌ Sistema não está pronto. Inicialize o orchestrator na página inicial.")
+                        else:
+                            # Iniciar trabalho autônomo
+                            success, result = asyncio.run(start_autonomous_work(
+                                orchestrator=orchestrator,
+                                repo_url=repo,
+                                repo_name=repo_name,
+                                action=selected_action,
+                                autonomous=autonomous,
+                                create_pr=create_pr,
+                                run_tests=run_tests,
+                                priority=priority
+                            ))
+
+                            if success:
+                                task_id = result
+                                st.success("✅ Tarefa criada com sucesso!")
+
+                                st.info(f"""
+                                **🤖 O Construtor iniciou o trabalho!**
+
+                                **Repositório:** {repo_name}
+                                **Ação:** {selected_action}
+                                **Modo:** {'Autônomo' if autonomous else 'Supervisionado'}
+                                **Task ID:** {task_id}
+
+                                **O que vai acontecer:**
+                                1. Clonar o repositório
+                                2. Analisar com 7 agentes IA
+                                3. Executar a ação selecionada
+                                4. {'Executar testes' if run_tests else 'Pular testes'}
+                                5. {'Criar PR automaticamente' if create_pr else 'Aguardar aprovação'}
+
+                                Acompanhe o progresso na aba **📋 Tarefas**
+                                """)
+
+                                # Salvar no session state para a página de tarefas
+                                if 'tasks' not in st.session_state:
+                                    st.session_state['tasks'] = []
+
+                                st.session_state['tasks'].append({
+                                    'task_id': task_id,
+                                    'repo': repo,
+                                    'repo_name': repo_name,
+                                    'action': selected_action,
+                                    'autonomous': autonomous,
+                                    'create_pr': create_pr,
+                                    'status': 'in_progress',
+                                    'started_at': datetime.now().isoformat()
+                                })
+                            else:
+                                st.error(f"❌ Erro ao iniciar trabalho: {result}")
+
+    else:
+        st.error("❌ GitHub Token não configurado")
+        st.markdown("""
+        ### Como configurar:
+
+        1. **Gerar Token do GitHub:**
+           - Acesse: https://github.com/settings/tokens
+           - Clique em "Generate new token (classic)"
+           - Selecione os scopes: `repo`, `workflow`
+           - Copie o token gerado
+
+        2. **Adicionar no .env:**
+           ```bash
+           GITHUB_TOKEN=seu_token_aqui
+           ```
+
+        3. **Reiniciar o aplicativo**
+        """)
+
+        # Link rápido
+        st.markdown("[🔗 Gerar Token no GitHub](https://github.com/settings/tokens)")
+
+    # Repositórios recentes (exemplo)
+    st.markdown("---")
+    st.subheader("📜 Repositórios Recentes")
+
+    if 'tasks' in st.session_state and st.session_state['tasks']:
+        for task in st.session_state['tasks'][-5:]:
+            with st.expander(f"📦 {task['repo_name']} - {task['action']}"):
+                st.write(f"**Status:** {task['status']}")
+                st.write(f"**Repositório:** {task['repo']}")
+                st.write(f"**Modo:** {'Autônomo' if task.get('autonomous') else 'Supervisionado'}")
+    else:
+        st.info("Nenhum repositório trabalhado ainda")
 
 # ===========================
 # PÁGINA: AGENTES
@@ -246,6 +565,9 @@ elif page == "📋 Tarefas":
     # Lista de tarefas
     st.subheader("Tarefas Ativas")
 
+    # Lista de agentes disponíveis
+    agent_names = ["architect", "developer", "reviewer", "tester", "devops", "security", "optimizer"]
+
     # Filtros
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -305,6 +627,9 @@ elif page == "📊 Métricas":
         st.error("Sistema não disponível")
         st.stop()
 
+    # Lista de agentes para os gráficos
+    agent_names = ["Architect", "Developer", "Reviewer", "Tester", "DevOps", "Security", "Optimizer"]
+
     # Métricas gerais
     col1, col2, col3 = st.columns(3)
 
@@ -342,44 +667,140 @@ elif page == "📊 Métricas":
 # ===========================
 
 elif page == "💬 Chat":
-    st.title("💬 Chat com O Construtor")
+    st.title("💬 Debate Multi-IA")
+    st.markdown("**As 3 IAs debatem sua pergunta e chegam a um consenso**")
 
     # Inicializa histórico
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    if "debate_messages" not in st.session_state:
+        st.session_state.debate_messages = []
+
+    if "current_debate" not in st.session_state:
+        st.session_state.current_debate = None
+
+    # Barra superior com info
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.info("🏛️ Claude Opus\n\nArquitetura")
+    with col2:
+        st.info("🤖 GPT-5.1\n\nImplementacao")
+    with col3:
+        st.info("🔮 Gemini 2.5 Pro\n\nPerformance")
+
+    st.markdown("---")
 
     # Botão limpar
-    if st.button("🗑️ Limpar Conversa"):
-        st.session_state.messages = []
+    if st.button("🗑️ Novo Debate"):
+        st.session_state.debate_messages = []
+        st.session_state.current_debate = None
         st.rerun()
 
-    # Mostra histórico
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
+    # Mostra histórico do debate
+    for message in st.session_state.debate_messages:
+        avatar_map = {
+            "user": "👤",
+            "claude": "🏛️",
+            "gpt": "🤖",
+            "gemini": "🔮",
+            "system": "⚙️"
+        }
+
+        with st.chat_message(message["role"], avatar=avatar_map.get(message["role"], "💬")):
             st.markdown(message["content"])
 
-    # Input do usuário
-    if prompt := st.chat_input("Digite sua mensagem..."):
-        # Adiciona mensagem do usuário
-        st.session_state.messages.append({"role": "user", "content": prompt})
+            # Mostrar concordâncias/discordâncias
+            if "metadata" in message:
+                metadata = message["metadata"]
+                if metadata.get("agrees_with"):
+                    agrees = ", ".join(metadata["agrees_with"])
+                    st.caption(f"✅ Concorda com: {agrees}")
+                if metadata.get("disagrees_with"):
+                    disagrees = ", ".join(metadata["disagrees_with"])
+                    st.caption(f"❌ Discorda de: {disagrees}")
+                if metadata.get("confidence"):
+                    st.caption(f"📊 Confianca: {int(metadata['confidence'] * 100)}%")
 
-        with st.chat_message("user"):
+    # Input do usuário
+    if prompt := st.chat_input("Digite seu topico para debate..."):
+        # Adiciona mensagem do usuário
+        st.session_state.debate_messages.append({
+            "role": "user",
+            "content": prompt
+        })
+
+        with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
 
-        # Resposta do assistente
-        with st.chat_message("assistant"):
-            placeholder = st.empty()
-            placeholder.markdown("⏳ Processando...")
+        # INICIAR DEBATE
+        with st.spinner("🎯 Iniciando debate entre as 3 IAs..."):
+            # Importar sistema de debate
+            from core.debate_system import DebateOrchestrator, AIParticipant
+
+            # Criar orchestrador de debate
+            debate_orch = DebateOrchestrator(max_rounds=3)
+
+            # Placeholder para atualizações
+            status_placeholder = st.empty()
 
             try:
-                # TODO: Integrar com orquestrador para processar comando
-                response = f"Recebi sua solicitação: '{prompt}'. Analisando e distribuindo para os agentes apropriados..."
+                # EXECUTAR DEBATE REAL COM APIs
+                import asyncio
 
-                placeholder.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response})
+                # Função assíncrona para executar o debate
+                async def run_real_debate():
+                    session = await debate_orch.start_debate(
+                        topic=prompt,
+                        participants=[AIParticipant.CLAUDE, AIParticipant.GPT, AIParticipant.GEMINI]
+                    )
+                    return session
+
+                # Atualizar interface em tempo real
+                status_placeholder.info("🎤 Rodada 1: Chamando as 3 IAs em paralelo...")
+
+                # Executar debate
+                session = asyncio.run(run_real_debate())
+
+                # Adicionar todas as mensagens ao histórico
+                status_placeholder.empty()
+
+                for msg in session.messages:
+                    ai_name = msg.participant.value
+                    st.session_state.debate_messages.append({
+                        "role": ai_name,
+                        "content": msg.content,
+                        "metadata": {
+                            "round": msg.round_number,
+                            "agrees_with": [p.value for p in msg.agrees_with],
+                            "disagrees_with": [p.value for p in msg.disagrees_with],
+                            "confidence": msg.confidence
+                        }
+                    })
+
+                    with st.chat_message(ai_name, avatar={"claude": "🏛️", "gpt": "🤖", "gemini": "🔮"}[ai_name]):
+                        st.markdown(msg.content)
+
+                        # Mostrar metadados
+                        if msg.agrees_with:
+                            agrees = ", ".join([p.value.upper() for p in msg.agrees_with])
+                            st.caption(f"✅ Concorda com: {agrees}")
+                        if msg.disagrees_with:
+                            disagrees = ", ".join([p.value.upper() for p in msg.disagrees_with])
+                            st.caption(f"❌ Discorda de: {disagrees}")
+
+                # Mostrar consenso
+                if session.final_decision:
+                    st.session_state.debate_messages.append({
+                        "role": "system",
+                        "content": session.final_decision
+                    })
+
+                    with st.chat_message("system", avatar="⚙️"):
+                        st.markdown(session.final_decision)
 
             except Exception as e:
-                placeholder.error(f"Erro: {e}")
+                import traceback
+                error_details = traceback.format_exc()
+                status_placeholder.error(f"Erro no debate: {e}")
+                st.error(f"Detalhes: {error_details}")
 
 # Footer
 st.markdown("---")
