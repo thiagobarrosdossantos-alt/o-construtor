@@ -41,11 +41,11 @@ class ModelResponse:
 
 class VertexAIClient:
     """
-    Cliente Unificado para Vertex AI
+    Cliente Unificado para modelos de IA
 
     Fornece acesso a múltiplos modelos através de uma interface única:
-    - Claude Opus 4.5, Sonnet 4 (via AnthropicVertex)
-    - Gemini 3 Pro Preview, 2.5 Pro, 2.5 Flash, 2.0 Flash
+    - Claude Opus 4.5, Sonnet 4.5 (via Anthropic API direta)
+    - Gemini 3 Pro Preview, 2.5 Pro, 2.5 Flash, 2.0 Flash (via Vertex AI)
 
     Uso:
         client = VertexAIClient()
