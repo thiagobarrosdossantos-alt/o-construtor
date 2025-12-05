@@ -29,7 +29,20 @@ load_dotenv()
 async def clone_repository(repo_url: str, target_dir: str = None) -> tuple[bool, str]:
     """Clona um repositório GitHub"""
     try:
+        # Validação básica de segurança
+        if not repo_url.startswith(("https://github.com/", "git@github.com:")):
+            return False, "URL inválida: Apenas repositórios GitHub (HTTPS/SSH) são permitidos"
+
+        if ";" in repo_url or " " in repo_url:
+            return False, "URL inválida: Caracteres suspeitos detectados"
+
         repo_name = repo_url.split("/")[-1].replace(".git", "")
+        # Sanitizar nome do diretório
+        repo_name = "".join(c for c in repo_name if c.isalnum() or c in ('-', '_'))
+
+        if not repo_name:
+             return False, "URL inválida: Não foi possível determinar o nome do repositório"
+
         clone_path = target_dir or f"./repos/{repo_name}"
 
         # Criar diretório se não existir
@@ -39,12 +52,12 @@ async def clone_repository(repo_url: str, target_dir: str = None) -> tuple[bool,
         if Path(clone_path).exists():
             return True, clone_path
 
-        # Clonar
+        # Clonar (Lista de argumentos previne shell injection, mas validação acima é crucial)
         result = subprocess.run(
-            ["git", "clone", repo_url, clone_path],
+            ["git", "clone", "--depth", "1", repo_url, clone_path], # Depth 1 para ser mais rápido
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=120 # Aumentado timeout
         )
 
         if result.returncode == 0:
@@ -220,7 +233,9 @@ st.sidebar.markdown("---")
 if system_ready:
     st.sidebar.success("✅ Sistema Operacional")
     st.sidebar.metric("Agentes Ativos", len(orchestrator.agents) if orchestrator else 0)
-    st.sidebar.metric("Tarefas Pendentes", task_queue.get_queue_size() if task_queue else 0)
+    # get_queue_size agora é assíncrono por causa do Redis
+    queue_size = asyncio.run(task_queue.get_queue_size()) if task_queue else 0
+    st.sidebar.metric("Tarefas Pendentes", queue_size)
 else:
     st.sidebar.error("❌ Sistema Offline")
 
@@ -238,12 +253,15 @@ if page == "🏠 Dashboard":
     # Métricas principais
     col1, col2, col3, col4 = st.columns(4)
 
+    # get_queue_size agora é assíncrono
+    queue_size = asyncio.run(task_queue.get_queue_size()) if task_queue else 0
+
     with col1:
         st.metric("Agentes", len(orchestrator.agents))
     with col2:
         st.metric("Tarefas Concluídas", 0)  # TODO: pegar do orchestrator
     with col3:
-        st.metric("Em Andamento", task_queue.get_queue_size())
+        st.metric("Em Andamento", queue_size)
     with col4:
         st.metric("Taxa de Sucesso", "95%")
 
