@@ -1,0 +1,111 @@
+# O Construtor - Docker Compose
+# Orquestra todos os serviços do sistema
+
+version: '3.8'
+
+services:
+  # API Server (FastAPI)
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: o-construtor-api
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_REPOSITORY=${GITHUB_REPOSITORY}
+      - REDIS_URL=redis://redis:6379
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    depends_on:
+      - redis
+    networks:
+      - construtor-network
+    restart: unless-stopped
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Interface Streamlit
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: o-construtor-web
+    ports:
+      - "8501:8501"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - API_URL=http://api:8000
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      - api
+    networks:
+      - construtor-network
+    restart: unless-stopped
+    command: streamlit run app_advanced.py --server.port=8501 --server.address=0.0.0.0
+
+  # Redis (Cache e Task Queue)
+  redis:
+    image: redis:7-alpine
+    container_name: o-construtor-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - construtor-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # Prometheus (Métricas)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: o-construtor-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - construtor-network
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  # Grafana (Visualização)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: o-construtor-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    networks:
+      - construtor-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+networks:
+  construtor-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+  prometheus-data:
+  grafana-data:

@@ -80,7 +80,7 @@ class GeminiCodeAssistClient:
         self,
         project_id: Optional[str] = None,
         api_key: Optional[str] = None,
-        model: str = "gemini-2.5-flash-preview-05-20",  # Flash para baixa latência
+        model: str = "gemini-2.5-flash",  # Flash para baixa latência
     ):
         self.project_id = project_id or os.getenv("GCP_PROJECT_ID")
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
