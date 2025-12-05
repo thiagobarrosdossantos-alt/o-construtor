@@ -7,16 +7,22 @@ Gerencia a fila de tarefas para os agentes:
 - Retry automático
 - Timeout handling
 - Distribuição de carga
+- **Persistência via Redis** (NOVO)
 """
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+import json
+import os
+from dataclasses import dataclass, field, asdict
+from datetime import datetime
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 from uuid import uuid4
 from enum import Enum
 import heapq
+
+# Importar Redis
+import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)
 
@@ -93,15 +99,38 @@ class Task:
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
             "retry_count": self.retry_count,
-            "created_at": self.created_at.isoformat(),
-            "queued_at": self.queued_at.isoformat() if self.queued_at else None,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else str(self.created_at),
+            "queued_at": self.queued_at.isoformat() if isinstance(self.queued_at, datetime) else str(self.queued_at) if self.queued_at else None,
+            "started_at": self.started_at.isoformat() if isinstance(self.started_at, datetime) else str(self.started_at) if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if isinstance(self.completed_at, datetime) else str(self.completed_at) if self.completed_at else None,
             "result": self.result,
             "error": self.error,
             "correlation_id": self.correlation_id,
             "metadata": self.metadata,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Task':
+        """Cria tarefa a partir de dicionário"""
+        # Converter timestamps de volta
+        for field_name in ['created_at', 'queued_at', 'started_at', 'completed_at']:
+            if data.get(field_name):
+                try:
+                    data[field_name] = datetime.fromisoformat(data[field_name])
+                except (ValueError, TypeError):
+                    data[field_name] = None
+            else:
+                data[field_name] = None
+
+        # Converter status
+        if isinstance(data.get('status'), str):
+            data['status'] = TaskStatus(data['status'])
+
+        # Se created_at for None (bug fix), define agora
+        if not data.get('created_at'):
+            data['created_at'] = datetime.now()
+
+        return cls(**data)
 
 
 # Type alias para task handlers
@@ -110,95 +139,66 @@ TaskHandler = Callable[[Task], Coroutine[Any, Any, Any]]
 
 class TaskQueue:
     """
-    Fila de Tarefas do O Construtor
+    Fila de Tarefas do O Construtor (Redis-backed)
 
-    Implementa uma priority queue para gerenciar tarefas:
+    Implementa uma priority queue persistente usando Redis:
     - Tarefas críticas são processadas primeiro
     - Suporte a retry com backoff exponencial
     - Timeout automático
-    - Múltiplos workers paralelos
-
-    Uso:
-        queue = TaskQueue()
-
-        # Registrar handler
-        async def process_code_review(task: Task):
-            return {"status": "approved"}
-
-        queue.register_handler("code_review", process_code_review)
-
-        # Adicionar tarefa
-        task = await queue.enqueue(
-            name="Review PR #123",
-            task_type="code_review",
-            payload={"pr_number": 123},
-            priority=TaskPriority.HIGH,
-        )
-
-        # Iniciar processamento
-        await queue.start_workers(num_workers=3)
+    - Persistência real para escalabilidade
     """
 
-    def __init__(self):
-        # Priority queue (heap)
-        self._queue: List[Task] = []
+    def __init__(self, redis_url: str = None):
+        # Configuração do Redis
+        self.redis_url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        self.redis: Optional[redis.Redis] = None
 
-        # Tasks por ID (para lookup rápido)
-        self._tasks: Dict[str, Task] = {}
-
-        # Handlers por tipo de tarefa
+        # Handlers por tipo de tarefa (em memória, cada worker tem os seus)
         self._handlers: Dict[str, TaskHandler] = {}
 
-        # Workers ativos
+        # Workers locais
         self._workers: List[asyncio.Task] = []
         self._running = False
-
-        # Semáforo para controle de concorrência
         self._semaphore: Optional[asyncio.Semaphore] = None
 
-        # Estatísticas
-        self._stats = {
-            "total_enqueued": 0,
-            "total_completed": 0,
-            "total_failed": 0,
-            "total_retries": 0,
-            "by_type": {},
-        }
+        # Chaves do Redis
+        self.QUEUE_KEY = "task_queue:pending"  # Sorted set (score = priority)
+        self.TASKS_KEY = "task_queue:data"     # Hash map (id -> json)
+        self.PROCESSING_KEY = "task_queue:processing" # Set
 
-        # Event para notificar workers de novas tarefas
-        self._new_task_event = asyncio.Event()
+        logger.info(f"TaskQueue initialized with Redis: {self.redis_url}")
 
-        logger.info("TaskQueue initialized")
+    async def initialize(self):
+        """Inicializa conexão com Redis"""
+        # Se já existe e está fechado, ou loop fechou, recria
+        if self.redis:
+            try:
+                await self.redis.ping()
+            except (ConnectionError, RuntimeError):
+                # RuntimeError geralmente significa loop fechado
+                logger.warning("Redis connection lost or loop closed. Reconnecting...")
+                await self.redis.close()
+                self.redis = None
+
+        if not self.redis:
+            self.redis = redis.from_url(self.redis_url, decode_responses=True)
+            try:
+                await self.redis.ping()
+                logger.info("Connected to Redis successfully")
+            except Exception as e:
+                logger.error(f"Failed to connect to Redis: {e}")
+                raise ConnectionError(f"Redis connection failed: {e}")
 
     # ============================================================
     # HANDLER REGISTRATION
     # ============================================================
 
-    def register_handler(
-        self,
-        task_type: str,
-        handler: TaskHandler,
-    ) -> None:
-        """
-        Registra um handler para um tipo de tarefa.
-
-        Args:
-            task_type: Tipo de tarefa
-            handler: Função async que processa a tarefa
-        """
+    def register_handler(self, task_type: str, handler: TaskHandler) -> None:
         self._handlers[task_type] = handler
-        logger.debug(f"Handler registered for task type: {task_type}")
 
     def unregister_handler(self, task_type: str) -> None:
-        """
-        Remove handler de um tipo de tarefa.
-
-        Args:
-            task_type: Tipo de tarefa
-        """
         if task_type in self._handlers:
             del self._handlers[task_type]
-            logger.debug(f"Handler unregistered for task type: {task_type}")
 
     # ============================================================
     # TASK MANAGEMENT
@@ -217,24 +217,10 @@ class TaskQueue:
         parent_task_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Task:
-        """
-        Adiciona uma tarefa à fila.
+        """Adiciona uma tarefa à fila Redis"""
+        if not self.redis:
+            await self.initialize()
 
-        Args:
-            name: Nome descritivo da tarefa
-            task_type: Tipo da tarefa (deve ter handler registrado)
-            payload: Dados da tarefa
-            priority: Prioridade
-            timeout_seconds: Timeout em segundos
-            max_retries: Número máximo de retries
-            assigned_agent: Agente específico para executar
-            correlation_id: ID para correlação
-            parent_task_id: ID da tarefa pai
-            metadata: Metadados adicionais
-
-        Returns:
-            Task criada
-        """
         task = Task(
             priority=priority.value,
             created_at=datetime.now(),
@@ -252,172 +238,128 @@ class TaskQueue:
         task.status = TaskStatus.QUEUED
         task.queued_at = datetime.now()
 
-        # Adiciona ao heap (priority queue)
-        heapq.heappush(self._queue, task)
+        # Salvar dados da task
+        task_json = json.dumps(task.to_dict())
+        await self.redis.hset(self.TASKS_KEY, task.id, task_json)
 
-        # Registra para lookup
-        self._tasks[task.id] = task
+        # Adicionar à fila de prioridade (Sorted Set)
+        # Redis ZSET ordena do menor para o maior score.
+        # TaskPriority: CRITICAL=1 (primeiro), LOW=4 (ultimo).
+        # Usamos priority como score diretamente.
+        await self.redis.zadd(self.QUEUE_KEY, {task.id: task.priority})
 
-        # Atualiza estatísticas
-        self._stats["total_enqueued"] += 1
-        self._stats["by_type"][task_type] = self._stats["by_type"].get(task_type, 0) + 1
-
-        # Notifica workers
-        self._new_task_event.set()
-
-        logger.info(f"Task enqueued: {task.name} (type: {task_type}, priority: {priority.name})")
+        logger.info(f"Task enqueued (Redis): {task.name} ID: {task.id}")
         return task
 
     async def dequeue(self) -> Optional[Task]:
-        """
-        Remove e retorna a próxima tarefa da fila (maior prioridade).
+        """Remove e retorna a próxima tarefa da fila Redis"""
+        if not self.redis:
+            await self.initialize()
 
-        Returns:
-            Task ou None se fila vazia
-        """
-        while self._queue:
-            task = heapq.heappop(self._queue)
+        # Transação atômica para pegar e mover para processing seria ideal
+        # Simplificação: ZPOPMIN
+        result = await self.redis.zpopmin(self.QUEUE_KEY)
+        if not result:
+            return None
 
-            # Verifica se task ainda existe e está no estado correto
-            if task.id in self._tasks and task.status == TaskStatus.QUEUED:
-                return task
+        task_id, score = result[0]  # zpopmin retorna lista de tuplas [(member, score)]
 
+        # Pegar dados completos
+        task_json = await self.redis.hget(self.TASKS_KEY, task_id)
+        if not task_json:
+            logger.warning(f"Task ID {task_id} in queue but data missing")
+            return None
+
+        # Deserializar
+        task_dict = json.loads(task_json)
+        task = Task.from_dict(task_dict)
+
+        # Mover para status de processamento (opcional, para monitoramento)
+        task.status = TaskStatus.RUNNING
+        await self.redis.sadd(self.PROCESSING_KEY, task.id)
+        # Atualizar status no hash
+        task_dict['status'] = TaskStatus.RUNNING.value
+        await self.redis.hset(self.TASKS_KEY, task.id, json.dumps(task_dict))
+
+        return task
+
+    async def get_task(self, task_id: str) -> Optional[Task]:
+        """Retorna uma tarefa pelo ID"""
+        if not self.redis:
+            await self.initialize()
+
+        task_json = await self.redis.hget(self.TASKS_KEY, task_id)
+        if task_json:
+            return Task.from_dict(json.loads(task_json))
         return None
 
-    def get_task(self, task_id: str) -> Optional[Task]:
-        """
-        Retorna uma tarefa pelo ID.
-
-        Args:
-            task_id: ID da tarefa
-
-        Returns:
-            Task ou None
-        """
-        return self._tasks.get(task_id)
-
-    async def cancel_task(self, task_id: str) -> bool:
-        """
-        Cancela uma tarefa.
-
-        Args:
-            task_id: ID da tarefa
-
-        Returns:
-            True se cancelada com sucesso
-        """
-        task = self._tasks.get(task_id)
-        if not task:
-            return False
-
-        if task.status in [TaskStatus.PENDING, TaskStatus.QUEUED]:
-            task.status = TaskStatus.CANCELLED
-            logger.info(f"Task cancelled: {task_id}")
-            return True
-
-        return False
-
     # ============================================================
-    # TASK EXECUTION
+    # QUERY METHODS (Restored for Dashboard)
     # ============================================================
 
-    async def _execute_task(self, task: Task) -> None:
+    async def get_queue_size(self) -> int:
+        """Retorna número de tarefas na fila de espera"""
+        if not self.redis: await self.initialize()
+        return await self.redis.zcard(self.QUEUE_KEY)
+
+    async def get_running_tasks(self) -> List[Task]:
+        """Retorna lista de tarefas em execução"""
+        if not self.redis: await self.initialize()
+
+        # Get IDs from processing set
+        processing_ids = await self.redis.smembers(self.PROCESSING_KEY)
+        if not processing_ids:
+            return []
+
+        # Fetch actual task data
+        tasks = []
+        for tid in processing_ids:
+            t = await self.get_task(tid)
+            if t: tasks.append(t)
+        return tasks
+
+    async def get_all_tasks(self, limit: int = 100) -> List[Task]:
         """
-        Executa uma tarefa individual.
-
-        Args:
-            task: Tarefa a executar
+        Retorna todas as tarefas (limitado).
+        Nota: Em produção com Redis, idealmente usaria SCAN ou chaves separadas por status.
+        Aqui faremos um scan simples no hash de dados.
         """
-        handler = self._handlers.get(task.task_type)
-        if not handler:
-            logger.error(f"No handler for task type: {task.task_type}")
-            task.status = TaskStatus.FAILED
-            task.error = f"No handler registered for type: {task.task_type}"
-            return
+        if not self.redis: await self.initialize()
 
-        task.status = TaskStatus.RUNNING
-        task.started_at = datetime.now()
+        # Pegar chaves aleatórias ou scan (simplificado: HGETALL é perigoso se muito grande)
+        # Vamos usar HSCAN
+        tasks = []
+        cursor = 0
+        while True:
+            cursor, data = await self.redis.hscan(self.TASKS_KEY, cursor, count=20)
+            for tid, task_json in data.items():
+                try:
+                    tasks.append(Task.from_dict(json.loads(task_json)))
+                except:
+                    pass
+            if cursor == 0 or len(tasks) >= limit:
+                break
 
-        logger.info(f"Executing task: {task.name} (ID: {task.id})")
-
-        try:
-            # Executa com timeout
-            result = await asyncio.wait_for(
-                handler(task),
-                timeout=task.timeout_seconds,
-            )
-
-            task.status = TaskStatus.COMPLETED
-            task.result = result
-            task.completed_at = datetime.now()
-
-            self._stats["total_completed"] += 1
-            logger.info(f"Task completed: {task.name}")
-
-        except asyncio.TimeoutError:
-            task.status = TaskStatus.TIMEOUT
-            task.error = f"Task timed out after {task.timeout_seconds} seconds"
-            logger.error(f"Task timeout: {task.name}")
-
-            # Tenta retry
-            await self._maybe_retry(task)
-
-        except Exception as e:
-            task.status = TaskStatus.FAILED
-            task.error = str(e)
-            logger.error(f"Task failed: {task.name} - {e}")
-
-            # Tenta retry
-            await self._maybe_retry(task)
-
-    async def _maybe_retry(self, task: Task) -> None:
-        """
-        Verifica se deve fazer retry e reenfileira se necessário.
-
-        Args:
-            task: Tarefa que falhou
-        """
-        if task.retry_count < task.max_retries:
-            task.retry_count += 1
-            task.status = TaskStatus.RETRYING
-
-            # Calcula delay com backoff exponencial
-            delay = task.retry_delay_seconds * (2 ** (task.retry_count - 1))
-
-            logger.info(
-                f"Retrying task {task.name} in {delay}s "
-                f"(attempt {task.retry_count}/{task.max_retries})"
-            )
-
-            self._stats["total_retries"] += 1
-
-            # Aguarda delay e reenfileira
-            await asyncio.sleep(delay)
-
-            task.status = TaskStatus.QUEUED
-            task.queued_at = datetime.now()
-            heapq.heappush(self._queue, task)
-            self._new_task_event.set()
-
-        else:
-            task.status = TaskStatus.FAILED
-            self._stats["total_failed"] += 1
-            logger.error(f"Task failed after {task.max_retries} retries: {task.name}")
+        return tasks[:limit]
 
     # ============================================================
-    # WORKER MANAGEMENT
+    # TASK EXECUTION & WORKERS
     # ============================================================
 
     async def start_workers(self, num_workers: int = 3) -> None:
-        """
-        Inicia workers para processar a fila.
-
-        Args:
-            num_workers: Número de workers paralelos
-        """
         if self._running:
-            logger.warning("Workers already running")
             return
+
+        # Inicializa redis se necessário
+        if not self.redis:
+            try:
+                await self.initialize()
+            except Exception:
+                # Se falhar ao conectar (ex: local dev sem redis), loga erro mas não quebra tudo
+                # ou implementa fallback in-memory se fosse crítico.
+                # Aqui vamos falhar graciosamente
+                logger.error("Cannot start workers without Redis")
+                return
 
         self._running = True
         self._semaphore = asyncio.Semaphore(num_workers)
@@ -426,117 +368,88 @@ class TaskQueue:
             worker = asyncio.create_task(self._worker_loop(f"worker-{i}"))
             self._workers.append(worker)
 
-        logger.info(f"Started {num_workers} workers")
+        logger.info(f"Started {num_workers} Redis workers")
 
-    async def stop_workers(self, timeout: float = 30.0) -> None:
-        """
-        Para todos os workers gracefully.
-
-        Args:
-            timeout: Tempo máximo de espera
-        """
+    async def stop_workers(self) -> None:
         self._running = False
-        self._new_task_event.set()  # Desperta workers dormindo
-
-        # Aguarda workers terminarem
         if self._workers:
-            try:
-                await asyncio.wait_for(
-                    asyncio.gather(*self._workers, return_exceptions=True),
-                    timeout=timeout,
-                )
-            except asyncio.TimeoutError:
-                logger.warning("Workers did not stop in time, cancelling...")
-                for worker in self._workers:
-                    worker.cancel()
-
-        self._workers.clear()
-        logger.info("Workers stopped")
+            for w in self._workers:
+                w.cancel()
+        if self.redis:
+            await self.redis.close()
 
     async def _worker_loop(self, worker_id: str) -> None:
-        """
-        Loop principal de um worker.
-
-        Args:
-            worker_id: Identificador do worker
-        """
         logger.debug(f"Worker {worker_id} started")
-
         while self._running:
-            # Aguarda nova tarefa ou shutdown
             try:
-                await asyncio.wait_for(
-                    self._new_task_event.wait(),
-                    timeout=1.0,
-                )
-            except asyncio.TimeoutError:
-                continue
-
-            self._new_task_event.clear()
-
-            # Processa tarefas disponíveis
-            while self._running:
+                # Polling com backoff se vazio
                 task = await self.dequeue()
                 if not task:
-                    break
+                    await asyncio.sleep(1) # Wait if queue is empty
+                    continue
 
                 async with self._semaphore:
                     await self._execute_task(task)
 
-        logger.debug(f"Worker {worker_id} stopped")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Worker error: {e}")
+                await asyncio.sleep(5)
 
-    # ============================================================
-    # QUERY AND STATS
-    # ============================================================
+    async def _execute_task(self, task: Task) -> None:
+        handler = self._handlers.get(task.task_type)
+        if not handler:
+            logger.error(f"No handler for {task.task_type}")
+            await self._update_task_status(task, TaskStatus.FAILED, error="No handler")
+            return
 
-    def get_queue_size(self) -> int:
-        """Retorna número de tarefas na fila"""
-        return len([t for t in self._queue if t.status == TaskStatus.QUEUED])
+        task.status = TaskStatus.RUNNING
+        task.started_at = datetime.now()
+        await self._update_task_status(task, TaskStatus.RUNNING)
 
-    def get_pending_tasks(self, limit: int = 50) -> List[Task]:
-        """Retorna tarefas pendentes/enfileiradas"""
-        return [
-            t for t in self._tasks.values()
-            if t.status in [TaskStatus.PENDING, TaskStatus.QUEUED]
-        ][:limit]
+        try:
+            result = await asyncio.wait_for(handler(task), timeout=task.timeout_seconds)
 
-    def get_running_tasks(self) -> List[Task]:
-        """Retorna tarefas em execução"""
-        return [t for t in self._tasks.values() if t.status == TaskStatus.RUNNING]
+            task.result = result
+            task.completed_at = datetime.now()
+            await self._update_task_status(task, TaskStatus.COMPLETED, result=result)
+            logger.info(f"Task {task.name} completed")
 
-    def get_completed_tasks(self, limit: int = 50) -> List[Task]:
-        """Retorna tarefas completadas"""
-        tasks = [t for t in self._tasks.values() if t.status == TaskStatus.COMPLETED]
-        return sorted(tasks, key=lambda t: t.completed_at or datetime.min, reverse=True)[:limit]
+        except Exception as e:
+            logger.error(f"Task {task.name} failed: {e}")
 
-    def get_failed_tasks(self, limit: int = 50) -> List[Task]:
-        """Retorna tarefas que falharam"""
-        return [t for t in self._tasks.values() if t.status == TaskStatus.FAILED][:limit]
+            if task.retry_count < task.max_retries:
+                # Retry
+                task.retry_count += 1
+                task.status = TaskStatus.RETRYING
+                # Re-queue with priority (maybe lower priority or same)
+                # Ideally with delay (implementing delay in Redis requires ZADD with future timestamp)
+                # Simples re-enqueue for now
+                await asyncio.sleep(task.retry_delay_seconds)
 
-    def get_stats(self) -> Dict[str, Any]:
-        """Retorna estatísticas da fila"""
-        return {
-            **self._stats,
-            "queue_size": self.get_queue_size(),
-            "running_count": len(self.get_running_tasks()),
-            "total_tasks": len(self._tasks),
-            "workers_active": len(self._workers) if self._running else 0,
-        }
+                # Update data
+                task_json = json.dumps(task.to_dict())
+                await self.redis.hset(self.TASKS_KEY, task.id, task_json)
+                await self.redis.zadd(self.QUEUE_KEY, {task.id: task.priority})
+            else:
+                await self._update_task_status(task, TaskStatus.FAILED, error=str(e))
 
-    def clear_completed(self) -> int:
-        """
-        Remove tarefas completadas do histórico.
+        finally:
+             # Remove from processing set
+            await self.redis.srem(self.PROCESSING_KEY, task.id)
 
-        Returns:
-            Número de tarefas removidas
-        """
-        completed_ids = [
-            task_id for task_id, task in self._tasks.items()
-            if task.status in [TaskStatus.COMPLETED, TaskStatus.CANCELLED]
-        ]
+    async def _update_task_status(self, task: Task, status: TaskStatus, result: Any = None, error: str = None):
+        """Atualiza status da tarefa no Redis"""
+        task.status = status
+        if result: task.result = result
+        if error: task.error = error
 
-        for task_id in completed_ids:
-            del self._tasks[task_id]
+        # Atualiza timestamp based on status
+        if status == TaskStatus.RUNNING:
+            task.started_at = datetime.now()
+        elif status in [TaskStatus.COMPLETED, TaskStatus.FAILED]:
+            task.completed_at = datetime.now()
 
-        logger.info(f"Cleared {len(completed_ids)} completed tasks")
-        return len(completed_ids)
+        task_dict = task.to_dict()
+        await self.redis.hset(self.TASKS_KEY, task.id, json.dumps(task_dict))
