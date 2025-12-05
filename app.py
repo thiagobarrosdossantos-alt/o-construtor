@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
-from google import genai # Biblioteca nova do Google (SDK v2)
+import google.generativeai as genai # Biblioteca nova do Google (SDK v2)
 
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
@@ -21,16 +21,15 @@ if not api_key:
     st.info("Crie um arquivo .env na raiz e cole sua chave: GOOGLE_API_KEY=AIza...")
     st.stop()
 
-# Inicializa o cliente com a biblioteca nova
+# Configura a API Key do Google
 try:
-    client = genai.Client(api_key=api_key)
+    genai.configure(api_key=api_key)
 except Exception as e:
-    st.error(f"Erro ao inicializar o cliente Google: {e}")
+    st.error(f"Erro ao configurar a API do Google: {e}")
     st.stop()
 
 # --- 3. ESCOLHA DO MODELO ---
-# DICA: Se o 'gemini-3-pro-preview' der erro, troque por 'gemini-2.0-flash-exp'
-MODELO_ATUAL = "gemini-2.0-flash-exp" 
+MODELO_ATUAL = "gemini-1.5-flash-latest" 
 
 # --- 4. INTERFACE VISUAL ---
 st.title("🏗️ O Construtor")
@@ -62,11 +61,9 @@ if prompt := st.chat_input("Dê uma ordem para a construção..."):
         placeholder.markdown("⏳ *O Construtor está pensando...*")
         
         try:
-            # Chamada para a API nova do Google
-            response = client.models.generate_content(
-                model=MODELO_ATUAL,
-                contents=prompt
-            )
+            # Cria o modelo e gera o conteúdo
+            model = genai.GenerativeModel(MODELO_ATUAL)
+            response = model.generate_content(prompt)
             
             texto_resposta = response.text
             placeholder.markdown(texto_resposta)

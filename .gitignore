@@ -1,7 +1,15 @@
 .env
 
-.env
-
 venv/
 
 __pycache__/
+
+# Arquivos de teste temporários
+test_*.py
+
+# Configuração local do Claude Code
+.claude/
+
+# Scripts de recuperação locais
+recovery.ps1
+*.ps1
