@@ -160,8 +160,11 @@ cd o-construtor
 ```bash
 # Crie arquivo .env
 cat > .env << EOF
-# Google AI
-GOOGLE_API_KEY=sua_chave_aqui
+# Anthropic (Claude) - API Direta
+ANTHROPIC_API_KEY=sua_chave_anthropic
+
+# Google AI (Gemini)
+GOOGLE_API_KEY=sua_chave_google
 GCP_PROJECT_ID=seu_projeto_gcp
 
 # GitHub
@@ -241,8 +244,8 @@ O sistema usa **duas ferramentas de código juntas** para máxima eficiência:
 
 | Modelo | Provider | Melhor Para |
 |--------|----------|-------------|
-| `claude-opus-4-5-20251101` | Anthropic (Vertex) | Arquitetura, raciocínio profundo |
-| `claude-sonnet-4-20250514` | Anthropic (Vertex) | Implementação, código geral |
+| `claude-opus-4-5-20251101` | Anthropic (API Direta) | Arquitetura, raciocínio profundo |
+| `claude-sonnet-4-5-20250929` | Anthropic (API Direta) | Implementação, código geral |
 | `gemini-3-pro-preview` | Google (Vertex) | Performance, segurança, análise |
 | `gemini-2.5-pro` | Google (Vertex) | DevOps, documentação, review |
 | `gemini-2.5-flash-preview-05-20` | Google (Vertex) | Testes, alta velocidade |
@@ -254,7 +257,7 @@ O sistema usa **duas ferramentas de código juntas** para máxima eficiência:
 
 - **Interface:** Streamlit
 - **API:** FastAPI
-- **AI Providers:** Vertex AI (Claude + Gemini), Google AI Studio
+- **AI Providers:** Anthropic (Claude API Direta), Vertex AI (Gemini), Google AI Studio
 - **IDE Integration:** Claude Code CLI, Gemini Code Assist
 - **Database:** Supabase (planejado)
 - **Cache:** Redis (planejado)

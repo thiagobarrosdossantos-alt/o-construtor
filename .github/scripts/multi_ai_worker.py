@@ -5,17 +5,21 @@ import time
 import random
 import vertexai
 from vertexai.generative_models import GenerativeModel, HarmCategory, HarmBlockThreshold
-from anthropic import AnthropicVertex
+from anthropic import Anthropic  # API Anthropic direta (não Vertex)
 from github import Github
 
 # Configuration
 PROJECT_ID = os.getenv('GCP_PROJECT_ID', 'gen-lang-client-0394737170')
 LOCATION = "us-central1"
 
+# Anthropic API Key (direta, não Vertex)
+ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+
 # Model definitions - ESTRATÉGIA OTIMIZADA
-# Claude Opus 4.5: Arquitetura e design (raciocínio profundo)
-MODEL_CLAUDE_NAME = "claude-opus-4-5-20251101"
-REQUESTED_CLAUDE_MODEL = "claude-opus-4-5-20251101"
+# Claude da Anthropic direta (não Vertex AI)
+MODEL_CLAUDE_OPUS = "claude-opus-4-5-20251101"
+MODEL_CLAUDE_SONNET = "claude-sonnet-4-5-20250929"
+MODEL_CLAUDE_NAME = MODEL_CLAUDE_OPUS  # Padrão para análises
 
 # Gemini 3 Pro Preview: Performance e Segurança (novo modelo com raciocínio melhorado)
 MODEL_GEMINI_3_PRO = "gemini-3-pro-preview"
@@ -40,11 +44,15 @@ def get_file_content(repo, file):
         print(f"Error reading {file.filename}: {e}")
         return ""
 
-async def call_claude_vertex(model_name, system_prompt, user_content):
+async def call_claude_anthropic(model_name, system_prompt, user_content):
     """
-    Calls Claude on Vertex AI using AnthropicVertex SDK.
+    Calls Claude using Anthropic API directly (not Vertex AI).
+    Requires ANTHROPIC_API_KEY environment variable.
     """
-    client = AnthropicVertex(region=LOCATION, project_id=PROJECT_ID)
+    if not ANTHROPIC_API_KEY:
+        raise ValueError("ANTHROPIC_API_KEY not found in environment variables")
+
+    client = Anthropic(api_key=ANTHROPIC_API_KEY)
     
     # Retry logic with exponential backoff [2, 4, 8]
     max_retries = 3
@@ -77,9 +85,9 @@ async def call_claude_vertex(model_name, system_prompt, user_content):
                 await asyncio.sleep(sleep_time)
             else:
                 # Fallback to standard Opus ID if custom one fails
-                if model_name != "claude-opus-4-5-20251101" and ("404" in str(e) or "not found" in str(e).lower()):
-                    print("⚠️ [Claude] Requested model not found. Falling back to standard Claude Opus 4.5.")
-                    return await call_claude_vertex("claude-opus-4-5-20251101", system_prompt, user_content)
+                if model_name != MODEL_CLAUDE_OPUS and ("404" in str(e) or "not found" in str(e).lower()):
+                    print(f"⚠️ [Claude] Requested model not found. Falling back to {MODEL_CLAUDE_OPUS}.")
+                    return await call_claude_anthropic(MODEL_CLAUDE_OPUS, system_prompt, user_content)
                 raise e
 
 async def call_gemini_vertex(model_name, system_prompt, user_content):
@@ -148,7 +156,7 @@ async def analyze_with_model(agent_name: str, model_name: str, system_prompt: st
     
     try:
         if "claude" in agent_name.lower() or "claude" in model_name.lower():
-            return await call_claude_vertex(model_name, system_prompt, user_content)
+            return await call_claude_anthropic(model_name, system_prompt, user_content)
         else:
             return await call_gemini_vertex(model_name, system_prompt, user_content)
     except Exception as e:

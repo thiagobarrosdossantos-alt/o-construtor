@@ -1,9 +1,9 @@
 """
-O Construtor - Vertex AI Client
-Cliente unificado para modelos via Google Cloud Vertex AI
+O Construtor - AI Client
+Cliente unificado para modelos de IA
 
 Suporta:
-- Claude (Anthropic) via Vertex AI
+- Claude (Anthropic) via API direta
 - Gemini via Vertex AI
 - Outros modelos disponíveis no Vertex
 """
@@ -59,10 +59,10 @@ class VertexAIClient:
 
     # Mapeamento de modelos para providers
     MODEL_PROVIDERS = {
-        # Claude models
+        # Claude models (Anthropic API direta)
         "claude-opus-4-5-20251101": ModelProvider.ANTHROPIC,
-        "claude-sonnet-4-20250514": ModelProvider.ANTHROPIC,
-        # Gemini models
+        "claude-sonnet-4-5-20250929": ModelProvider.ANTHROPIC,
+        # Gemini models (Vertex AI)
         "gemini-3-pro-preview": ModelProvider.GOOGLE,
         "gemini-2.5-pro": ModelProvider.GOOGLE,
         "gemini-2.5-flash-preview-05-20": ModelProvider.GOOGLE,
@@ -73,9 +73,11 @@ class VertexAIClient:
         self,
         project_id: Optional[str] = None,
         region: str = "us-central1",
+        anthropic_api_key: Optional[str] = None,
     ):
         self.project_id = project_id or os.getenv("GCP_PROJECT_ID", "gen-lang-client-0394737170")
         self.region = region
+        self.anthropic_api_key = anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
 
         self._anthropic_client: Optional[Any] = None
         self._vertex_initialized = False
@@ -88,7 +90,7 @@ class VertexAIClient:
             "total_cost": 0.0,
         }
 
-        logger.info(f"VertexAIClient initialized for project {self.project_id}")
+        logger.info(f"AIClient initialized for project {self.project_id}")
 
     async def initialize(self) -> bool:
         """Inicializa clientes"""
@@ -99,24 +101,24 @@ class VertexAIClient:
             # Inicializa Vertex AI para Gemini
             import vertexai
             vertexai.init(project=self.project_id, location=self.region)
-            logger.info("Vertex AI initialized")
+            logger.info("Vertex AI initialized for Gemini")
 
-            # Inicializa AnthropicVertex para Claude
+            # Inicializa Anthropic direta para Claude
             try:
-                from anthropic import AnthropicVertex
-                self._anthropic_client = AnthropicVertex(
-                    region=self.region,
-                    project_id=self.project_id,
-                )
-                logger.info("AnthropicVertex initialized")
+                from anthropic import Anthropic
+                if self.anthropic_api_key:
+                    self._anthropic_client = Anthropic(api_key=self.anthropic_api_key)
+                    logger.info("Anthropic client initialized (direct API)")
+                else:
+                    logger.warning("ANTHROPIC_API_KEY not found - Claude models unavailable")
             except Exception as e:
-                logger.warning(f"AnthropicVertex init failed: {e}")
+                logger.warning(f"Anthropic client init failed: {e}")
 
             self._vertex_initialized = True
             return True
 
         except Exception as e:
-            logger.error(f"Vertex AI initialization failed: {e}")
+            logger.error(f"AI Client initialization failed: {e}")
             return False
 
     async def generate(
@@ -202,9 +204,9 @@ class VertexAIClient:
         max_tokens: int,
         temperature: float,
     ) -> ModelResponse:
-        """Chama modelo Claude via AnthropicVertex"""
+        """Chama modelo Claude via Anthropic API direta"""
         if not self._anthropic_client:
-            raise RuntimeError("AnthropicVertex not initialized")
+            raise RuntimeError("Anthropic client not initialized. Check ANTHROPIC_API_KEY.")
 
         messages = [{"role": "user", "content": prompt}]
 
@@ -332,7 +334,7 @@ class VertexAIClient:
                 "max_tokens": 8192,
                 "best_for": ["architecture", "complex analysis", "deep reasoning"],
             },
-            "claude-sonnet-4-20250514": {
+            "claude-sonnet-4-5-20250929": {
                 "provider": "anthropic",
                 "type": "balanced",
                 "max_tokens": 8192,

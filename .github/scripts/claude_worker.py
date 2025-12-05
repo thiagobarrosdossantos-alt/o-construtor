@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 import os
 import json
-from vertexai.generative_models import GenerativeModel
-from anthropic import AnthropicVertex
-import vertexai
+from anthropic import Anthropic  # API Anthropic direta (não Vertex)
 from github import Github
 
 # ================== CONFIG ==================
-PROJECT_ID = os.getenv('GCP_PROJECT_ID', 'gen-lang-client-0394737170')
-LOCATION = "us-central1"
+# Anthropic API Key (direta, não Vertex)
+ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+
+# Modelo Claude da Anthropic direta
 MODEL = "claude-opus-4-5-20251101"
 
-# Inicializar Vertex AI
-vertexai.init(project=PROJECT_ID, location=LOCATION)
+# Inicializar cliente Anthropic direta
+if not ANTHROPIC_API_KEY:
+    raise ValueError("ANTHROPIC_API_KEY not found in environment variables")
 
-# Updating to use AnthropicVertex to be consistent with the working multi_ai_worker.py
-client = AnthropicVertex(region=LOCATION, project_id=PROJECT_ID)
+client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # GitHub
 g = Github(os.getenv('GITHUB_TOKEN'))
@@ -79,7 +79,7 @@ Seja DIRETO.
     if review_comments:
         comment_body = "\n\n---\n\n".join(review_comments)
         pr.create_issue_comment(f"""
-🤖 **Revisão Automática via Vertex AI - Claude Opus 4.5**
+🤖 **Revisão Automática via Anthropic API - Claude Opus 4.5**
 
 {comment_body}
 
