@@ -48,7 +48,7 @@ pandas==2.3.3  # Data manipulation
 
 # === TESTING (dev only) ===
 pytest==9.0.1
-# pytest-asyncio==0.23.0
+pytest-asyncio==0.24.0
 # pytest-cov==4.1.0
 
 # === DEVELOPMENT (dev only) ===

@@ -4,8 +4,9 @@ venv/
 
 __pycache__/
 
-# Arquivos de teste temporários
-test_*.py
+# Arquivos de teste temporários (apenas raiz, não tests/)
+/test_*.py
+/*_test.py
 
 # Configuração local do Claude Code
 .claude/
