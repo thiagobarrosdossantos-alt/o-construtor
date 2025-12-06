@@ -1,0 +1,44 @@
+# Configuração de Logging para O Construtor
+# Formato: YAML para fácil personalização
+
+# Níveis disponíveis: DEBUG, INFO, WARNING, ERROR, CRITICAL
+level: INFO
+
+# Diretório para arquivos de log
+log_dir: logs
+
+# Prefixo dos arquivos de log
+log_prefix: o-construtor
+
+# Habilitar saídas
+console:
+  enabled: true
+  colored: true  # Cores no console para melhor legibilidade
+
+file:
+  enabled: true
+  # Rotation por tamanho
+  max_bytes: 10485760  # 10MB
+  backup_count: 5      # Manter 5 backups
+
+json:
+  enabled: true
+  # JSON estruturado para parsing e análise
+  max_bytes: 10485760
+  backup_count: 10  # Mais backups para análise histórica
+
+# Configurações por componente (overrides)
+loggers:
+  core.orchestrator:
+    level: DEBUG  # Mais detalhes para orchestrator
+  core.task_queue:
+    level: DEBUG
+  core.debate_system:
+    level: INFO
+  app_advanced:
+    level: INFO
+
+# Performance monitoring
+performance:
+  log_slow_operations: true
+  slow_threshold_seconds: 5.0  # Log se operação > 5s

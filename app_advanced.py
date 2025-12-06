@@ -21,9 +21,14 @@ from core.event_bus import EventBus
 from core.memory_store import MemoryStore
 from core.task_queue import TaskQueue
 from config.models import TaskType
+from core.logging_config import setup_default_logging, get_logger
 
 # Carrega variáveis de ambiente
 load_dotenv()
+
+# Configura logging estruturado
+setup_default_logging()
+logger = get_logger(__name__, {"component": "streamlit_app"})
 
 # ===========================
 # ASYNC HELPERS (UI PERFORMANCE)
