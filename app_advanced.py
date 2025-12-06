@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 from datetime import datetime
 import plotly.graph_objects as go
 import plotly.express as px
+from concurrent.futures import ThreadPoolExecutor
+from typing import Coroutine, Any
 
 # Imports do sistema
 from core.orchestrator import Orchestrator
@@ -22,6 +24,41 @@ from config.models import TaskType
 
 # Carrega variáveis de ambiente
 load_dotenv()
+
+# ===========================
+# ASYNC HELPERS (UI PERFORMANCE)
+# ===========================
+
+def run_async_in_thread(coro: Coroutine) -> Any:
+    """
+    Executa coroutine em thread separada para prevenir UI freeze.
+
+    PERFORMANCE FIX: asyncio.run() em callbacks do Streamlit bloqueia o event loop
+    e congela a UI até a operação completar. Esta função executa o async code em
+    uma thread worker dedicada, permitindo que a UI do Streamlit permaneça responsiva.
+
+    Args:
+        coro: Coroutine a ser executada
+
+    Returns:
+        Resultado da coroutine
+
+    Raises:
+        Exception: Qualquer exceção levantada pela coroutine
+    """
+    def run_in_new_loop():
+        """Cria novo event loop e executa coroutine"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    # Executa em thread separada
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(run_in_new_loop)
+        return future.result()
 
 # ===========================
 # FUNÇÕES AUXILIARES GITHUB
@@ -471,8 +508,8 @@ elif page == "🔗 GitHub":
                         if not system_ready or orchestrator is None:
                             st.error("❌ Sistema não está pronto. Inicialize o orchestrator na página inicial.")
                         else:
-                            # Iniciar trabalho autônomo
-                            success, result = asyncio.run(start_autonomous_work(
+                            # Iniciar trabalho autônomo (PERFORMANCE: usa thread separada para não bloquear UI)
+                            success, result = run_async_in_thread(start_autonomous_work(
                                 orchestrator=orchestrator,
                                 repo_url=repo,
                                 repo_name=repo_name,
@@ -813,8 +850,8 @@ elif page == "💬 Chat":
                 # Atualizar interface em tempo real
                 status_placeholder.info("🎤 Rodada 1: Chamando as 3 IAs em paralelo...")
 
-                # Executar debate
-                session = asyncio.run(run_real_debate())
+                # Executar debate (PERFORMANCE: usa thread separada para não bloquear UI)
+                session = run_async_in_thread(run_real_debate())
 
                 # Adicionar todas as mensagens ao histórico
                 status_placeholder.empty()

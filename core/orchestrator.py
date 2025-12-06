@@ -11,11 +11,17 @@ Este é o componente mais importante do sistema:
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 from enum import Enum
 from uuid import uuid4
+
+# API Clients
+import anthropic
+from openai import OpenAI
+import google.generativeai as genai
 
 from config.settings import get_settings
 from config.models import (
@@ -121,7 +127,31 @@ class Orchestrator:
         self.agents: Dict[AgentRole, Any] = {}
         self._initialized = False
 
+        # API IMPLEMENTATION: Inicializar clientes reais das APIs
+        self._init_api_clients()
+
         logger.info("Orchestrator initialized")
+
+    def _init_api_clients(self):
+        """Inicializa clientes das APIs de IA"""
+        # Anthropic (Claude)
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        self.anthropic_client = anthropic.Anthropic(api_key=anthropic_key) if anthropic_key else None
+
+        # OpenAI (GPT)
+        openai_key = os.getenv("OPENAI_API_KEY")
+        self.openai_client = OpenAI(api_key=openai_key) if openai_key else None
+
+        # Google (Gemini)
+        google_key = os.getenv("GOOGLE_API_KEY")
+        if google_key:
+            genai.configure(api_key=google_key)
+            self.gemini_available = True
+        else:
+            self.gemini_available = False
+
+        logger.info(f"API Clients initialized - Claude: {bool(self.anthropic_client)}, "
+                    f"GPT: {bool(self.openai_client)}, Gemini: {self.gemini_available}")
 
     async def initialize(self):
         """Inicializa o orquestrador e seus componentes"""
@@ -577,51 +607,136 @@ class Orchestrator:
         context: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
-        Chama um agente específico para executar uma tarefa.
+        Chama um agente específico para executar uma tarefa via API real.
 
-        Esta é uma implementação placeholder que será conectada
-        aos clients reais (Vertex AI, Claude Code, etc.)
+        API IMPLEMENTATION: Conectado aos clients reais (Anthropic, OpenAI, Google)
         """
         # Obter valor de forma segura
         task_type_str = task_type.value if hasattr(task_type, 'value') else str(task_type)
 
         logger.info(f"Calling agent {agent_config.name} with model {model.name}")
 
-        # TODO: Implementar chamada real ao modelo
-        # Por enquanto, retorna placeholder
-        return {
-            "agent": agent_config.name,
-            "model": model.name,
-            "task": task_type_str,
-            "status": "placeholder",
-            "message": "Agent execution placeholder - implement real model calls",
-            "timestamp": datetime.now().isoformat(),
-        }
+        # Construir prompt baseado no agente e tarefa
+        prompt = self._build_prompt(agent_config, task_type_str, input_data, context)
 
-    async def _call_model(
+        # Chamar API real baseado no provider do modelo
+        try:
+            result = await self._call_model(model, prompt)
+            return {
+                "agent": agent_config.name,
+                "model": model.name,
+                "task": task_type_str,
+                "status": "success",
+                "result": result,
+                "timestamp": datetime.now().isoformat(),
+            }
+        except Exception as e:
+            logger.error(f"Error calling {model.name}: {e}")
+            return {
+                "agent": agent_config.name,
+                "model": model.name,
+                "task": task_type_str,
+                "status": "error",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat(),
+            }
+
+    async def _call_model(self, model: Any, prompt: str) -> str:
+        """
+        Chama um modelo específico via API real.
+
+        API IMPLEMENTATION: Conectado aos providers reais (Anthropic, OpenAI, Google)
+        """
+        model_name = model.name.lower()
+
+        # Claude (Anthropic)
+        if "claude" in model_name:
+            if not self.anthropic_client:
+                raise Exception("Anthropic API key not configured")
+
+            response = self.anthropic_client.messages.create(
+                model=model.name,
+                max_tokens=2000,
+                temperature=0.7,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return response.content[0].text
+
+        # GPT (OpenAI)
+        elif "gpt" in model_name:
+            if not self.openai_client:
+                raise Exception("OpenAI API key not configured")
+
+            response = self.openai_client.chat.completions.create(
+                model=model.name,
+                max_tokens=2000,
+                temperature=0.7,
+                messages=[
+                    {"role": "system", "content": "You are an expert software engineering AI assistant."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return response.choices[0].message.content
+
+        # Gemini (Google)
+        elif "gemini" in model_name:
+            if not self.gemini_available:
+                raise Exception("Google API key not configured")
+
+            gemini_model = genai.GenerativeModel(model.name)
+            response = gemini_model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=2000,
+                    temperature=0.7,
+                )
+            )
+            return response.text
+
+        else:
+            raise Exception(f"Unknown model provider for: {model.name}")
+
+    def _build_prompt(
         self,
-        model: Any,
-        task_type: TaskType,
+        agent_config: Any,
+        task_type: str,
         input_data: Dict[str, Any],
-        context: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """
-        Chama um modelo específico.
+        context: Dict[str, Any]
+    ) -> str:
+        """Constrói o prompt para o modelo baseado no agente e tarefa"""
+        # Prompt base com identidade do agente
+        prompt = f"""You are {agent_config.name} ({agent_config.emoji}), {agent_config.description}.
 
-        Esta é uma implementação placeholder.
-        """
-        # Obter valor de forma segura
-        task_type_str = task_type.value if hasattr(task_type, 'value') else str(task_type)
+Task Type: {task_type}
 
-        logger.info(f"Calling model {model.name} for task {task_type_str}")
+Input Data:
+{self._format_dict(input_data)}
 
-        # TODO: Implementar chamada real
-        return {
-            "model": model.name,
-            "task": task_type_str,
-            "status": "placeholder",
-            "timestamp": datetime.now().isoformat(),
-        }
+Context:
+{self._format_dict(context)}
+
+Please analyze the task and provide a comprehensive response following best practices for {task_type}.
+Focus on quality, security, performance, and maintainability."""
+
+        return prompt
+
+    def _format_dict(self, data: Dict[str, Any], indent: int = 0) -> str:
+        """Formata dicionário para exibição no prompt"""
+        lines = []
+        prefix = "  " * indent
+        for key, value in data.items():
+            if isinstance(value, dict):
+                lines.append(f"{prefix}{key}:")
+                lines.append(self._format_dict(value, indent + 1))
+            elif isinstance(value, list):
+                lines.append(f"{prefix}{key}: {', '.join(str(v) for v in value[:5])}")
+            else:
+                # Limitar tamanho de strings longas
+                str_value = str(value)
+                if len(str_value) > 200:
+                    str_value = str_value[:200] + "..."
+                lines.append(f"{prefix}{key}: {str_value}")
+        return "\n".join(lines)
 
     def _consolidate_results(
         self,
