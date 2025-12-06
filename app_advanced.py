@@ -6,6 +6,7 @@ import streamlit as st
 import asyncio
 import os
 import subprocess
+import re
 from pathlib import Path
 from dotenv import load_dotenv
 from datetime import datetime
@@ -26,10 +27,55 @@ load_dotenv()
 # FUNÇÕES AUXILIARES GITHUB
 # ===========================
 
+def validate_git_url(url: str) -> bool:
+    """
+    Valida URL de repositório Git para prevenir Command Injection.
+    Aceita apenas URLs HTTPS/SSH de GitHub e GitLab.
+    """
+    # Patterns seguros para GitHub e GitLab
+    patterns = [
+        r'^https://github\.com/[\w\-\.]+/[\w\-\.]+(?:\.git)?$',  # GitHub HTTPS
+        r'^git@github\.com:[\w\-\.]+/[\w\-\.]+(?:\.git)?$',       # GitHub SSH
+        r'^https://gitlab\.com/[\w\-\.]+/[\w\-\.]+(?:\.git)?$',   # GitLab HTTPS
+        r'^git@gitlab\.com:[\w\-\.]+/[\w\-\.]+(?:\.git)?$',       # GitLab SSH
+    ]
+
+    return any(re.match(pattern, url) for pattern in patterns)
+
+
+def sanitize_repo_name(url: str) -> str:
+    """
+    Extrai e sanitiza o nome do repositório de forma segura.
+    Remove caracteres perigosos e previne Path Traversal.
+    """
+    # Extrai o nome do repositório
+    name = url.rstrip('/').split('/')[-1].replace('.git', '')
+
+    # Remove caracteres perigosos (mantém apenas alfanuméricos, -, _ e .)
+    name = re.sub(r'[^\w\-\.]', '', name)
+
+    # Previne path traversal (remove . e .. no início)
+    name = name.lstrip('.')
+
+    # Garante que não está vazio
+    if not name:
+        raise ValueError("Nome de repositório inválido")
+
+    return name
+
+
 async def clone_repository(repo_url: str, target_dir: str = None) -> tuple[bool, str]:
-    """Clona um repositório GitHub"""
+    """
+    Clona um repositório GitHub/GitLab de forma segura.
+    Valida URL e sanitiza paths para prevenir Command Injection.
+    """
     try:
-        repo_name = repo_url.split("/")[-1].replace(".git", "")
+        # SEGURANÇA: Valida URL antes de usar
+        if not validate_git_url(repo_url):
+            return False, "URL de repositório inválida. Use apenas GitHub ou GitLab (HTTPS/SSH)"
+
+        # SEGURANÇA: Sanitiza o nome do repositório
+        repo_name = sanitize_repo_name(repo_url)
         clone_path = target_dir or f"./repos/{repo_name}"
 
         # Criar diretório se não existir
@@ -325,12 +371,23 @@ elif page == "🔗 GitHub":
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🔍 Buscar", use_container_width=True):
                 if repo_url:
-                    st.session_state['selected_repo'] = repo_url
+                    # SEGURANÇA: Valida URL antes de salvar
+                    if validate_git_url(repo_url):
+                        st.session_state['selected_repo'] = repo_url
+                        st.success("✅ Repositório válido!")
+                    else:
+                        st.error("❌ URL inválida! Use apenas GitHub ou GitLab (HTTPS/SSH)")
 
         # Se tem repositório selecionado
         if 'selected_repo' in st.session_state and st.session_state['selected_repo']:
             repo = st.session_state['selected_repo']
-            repo_name = repo.split('/')[-1].replace('.git', '')
+            # SEGURANÇA: Usa sanitização segura
+            try:
+                repo_name = sanitize_repo_name(repo)
+            except ValueError as e:
+                st.error(f"❌ Erro: {e}")
+                del st.session_state['selected_repo']
+                st.stop()
 
             st.markdown("---")
             st.subheader(f"📂 {repo_name}")

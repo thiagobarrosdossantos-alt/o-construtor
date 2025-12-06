@@ -41,6 +41,15 @@ COPY . .
 # Cria diretórios necessários
 RUN mkdir -p logs data
 
+# SECURITY: Cria usuário não-root para rodar aplicação
+# UID/GID 1000 é padrão para primeiro usuário em sistemas Linux
+RUN groupadd -r appuser -g 1000 && \
+    useradd -r -g appuser -u 1000 -m -s /bin/bash appuser && \
+    chown -R appuser:appuser /app
+
+# SECURITY: Muda para usuário não-root
+USER appuser
+
 # Expõe portas
 EXPOSE 8000 8501
 

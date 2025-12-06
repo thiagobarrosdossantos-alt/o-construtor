@@ -408,12 +408,13 @@ class TaskQueue:
     # WORKER MANAGEMENT
     # ============================================================
 
-    async def start_workers(self, num_workers: int = 3) -> None:
+    async def start_workers(self, num_workers: int = 3, cleanup_interval_minutes: int = 5) -> None:
         """
-        Inicia workers para processar a fila.
+        Inicia workers para processar a fila e worker de limpeza automática.
 
         Args:
             num_workers: Número de workers paralelos
+            cleanup_interval_minutes: Intervalo em minutos para cleanup automático (padrão: 5)
         """
         if self._running:
             logger.warning("Workers already running")
@@ -426,7 +427,11 @@ class TaskQueue:
             worker = asyncio.create_task(self._worker_loop(f"worker-{i}"))
             self._workers.append(worker)
 
-        logger.info(f"Started {num_workers} workers")
+        # MEMORY LEAK FIX: Inicia worker de cleanup automático
+        cleanup_worker = asyncio.create_task(self._cleanup_loop(cleanup_interval_minutes))
+        self._workers.append(cleanup_worker)
+
+        logger.info(f"Started {num_workers} workers + 1 cleanup worker (interval: {cleanup_interval_minutes}min)")
 
     async def stop_workers(self, timeout: float = 30.0) -> None:
         """
@@ -484,6 +489,46 @@ class TaskQueue:
                     await self._execute_task(task)
 
         logger.debug(f"Worker {worker_id} stopped")
+
+    async def _cleanup_loop(self, interval_minutes: int) -> None:
+        """
+        Loop de limpeza automática de tarefas completadas.
+        Previne memory leaks removendo tarefas antigas periodicamente.
+
+        Args:
+            interval_minutes: Intervalo em minutos entre limpezas
+        """
+        logger.debug("Cleanup worker started")
+        interval_seconds = interval_minutes * 60
+
+        while self._running:
+            try:
+                # Aguarda intervalo ou shutdown
+                await asyncio.sleep(interval_seconds)
+
+                if not self._running:
+                    break
+
+                # Executa limpeza
+                cleared_count = self.clear_completed()
+
+                if cleared_count > 0:
+                    logger.info(f"Automatic cleanup: removed {cleared_count} completed tasks")
+
+                    # Log estatísticas de memória
+                    stats = self.get_stats()
+                    logger.debug(
+                        f"Memory usage: {stats['total_tasks']} tasks in memory "
+                        f"({stats['running_count']} running, {stats['queue_size']} queued)"
+                    )
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in cleanup loop: {e}")
+                # Continua executando mesmo com erro
+
+        logger.debug("Cleanup worker stopped")
 
     # ============================================================
     # QUERY AND STATS

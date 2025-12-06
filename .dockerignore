@@ -21,33 +21,62 @@ ENV/
 .git/
 .gitignore
 
-# Environment
+# Environment & Secrets (SECURITY CRITICAL)
 .env
+.env.*
+*.env
 .env.local
+.env.production
+credentials.json
+*.key
+*.pem
+*.p12
+*.pfx
+service-account*.json
+.streamlit/secrets.toml
 
-# Logs
+# Logs (may contain sensitive data)
 logs/
 *.log
+*.log.*
 
-# Test
+# Test files
 .pytest_cache/
 .coverage
 htmlcov/
 test_*.py
 *_test.py
+check_libs.py
+list_gemini_models.py
+test_debate.py
+test_jules.py
+test_teams_integration.py
+exemplo_*.py
 
 # Documentation
 docs/_build/
+README_*.md
+PROMPT_*.txt
 
 # OS
 .DS_Store
 Thumbs.db
+nul
 
 # Docker
 docker-compose*.yml
 Dockerfile*
 
-# Temporary
+# Temporary & Build artifacts
 *.tmp
 *.bak
 *.swp
+repos/
+treino-inteligente-br/
+work_with_github_repo.py
+recovery.ps1
+
+# Database (if added later)
+*.db
+*.sqlite
+*.sqlite3

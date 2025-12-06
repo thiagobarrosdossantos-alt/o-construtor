@@ -1,54 +1,61 @@
 # O Construtor - Dependencies
 # Sistema Autônomo de Engenharia de Software
+#
+# SECURITY NOTE: Versões fixas para prevenir breaking changes e vulnerabilidades
+# Use requirements-lock.txt para reproduzir ambiente exato
+# Para atualizar: pip install -U <package> e update manualmente
 
 # === CORE ===
-python-dotenv>=1.0.0
-pydantic>=2.5.0
+python-dotenv==1.2.1
+pydantic==2.12.5
 
 # === WEB FRAMEWORK ===
-streamlit>=1.29.0
-fastapi>=0.104.0
-uvicorn>=0.24.0
-websockets>=12.0
+streamlit==1.51.0
+fastapi==0.123.9
+uvicorn==0.38.0
+websockets==12.0
 
 # === AI PROVIDERS ===
 # Google AI
-google-generativeai>=0.3.0
-google-cloud-aiplatform>=1.38.0
-vertexai>=1.0.0
+google-generativeai==0.8.5
+# google-cloud-aiplatform==1.38.0  # Opcional, se usar Vertex AI
+# vertexai==1.0.0  # Opcional, se usar Vertex AI
 
 # Anthropic (Claude)
-anthropic[vertex]>=0.39.0
+anthropic==0.75.0
+
+# OpenAI (optional, uncomment if needed)
+# openai==1.57.0
 
 # === GITHUB ===
-PyGithub>=2.1.0
+# PyGithub==2.1.0  # Opcional, se expandir integração GitHub
 
-# === DATABASE ===
-supabase>=2.3.0
-redis>=5.0.0
+# === DATABASE (opcional, para produção) ===
+# supabase==2.3.0
+# redis==5.0.0
 
 # === ASYNC ===
-asyncio>=3.4.3
-aiohttp>=3.9.0
-aiofiles>=23.2.0
+# asyncio==3.4.3  # Built-in no Python 3.7+
+aiohttp==3.9.0
+# aiofiles==23.2.0  # Opcional
 
 # === UTILITIES ===
-tenacity>=8.2.0  # Retry logic
-structlog>=23.2.0  # Structured logging
-prometheus-client>=0.19.0  # Metrics
-plotly>=5.18.0  # Interactive charts
-pandas>=2.1.0  # Data manipulation
+tenacity==9.1.2  # Retry logic
+# structlog==23.2.0  # Opcional
+# prometheus-client==0.19.0  # Opcional
+plotly==6.5.0  # Charts
+pandas==2.3.3  # Data manipulation
 
-# === TESTING ===
-pytest>=7.4.0
-pytest-asyncio>=0.23.0
-pytest-cov>=4.1.0
+# === TESTING (dev only) ===
+pytest==9.0.1
+# pytest-asyncio==0.23.0
+# pytest-cov==4.1.0
 
-# === DEVELOPMENT ===
-black>=23.12.0
-isort>=5.13.0
-mypy>=1.7.0
-ruff>=0.1.8
+# === DEVELOPMENT (dev only) ===
+# black==23.12.0
+# isort==5.13.0
+# mypy==1.7.0
+# ruff==0.1.8
 
-# === TYPE STUBS ===
-types-redis>=4.6.0
+# === TYPE STUBS (dev only) ===
+# types-redis==4.6.0

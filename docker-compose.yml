@@ -1,6 +1,13 @@
 # O Construtor - Docker Compose
 # Orquestra todos os serviços do sistema
 
+# SECURITY NOTE:
+# Os containers rodam como usuário não-root (UID:GID 1000:1000)
+# Certifique-se de que os diretórios montados têm permissões corretas:
+#   mkdir -p logs data
+#   chown -R 1000:1000 logs data
+# Ou use: sudo chown -R $(id -u):$(id -g) logs data
+
 version: '3.8'
 
 services:
